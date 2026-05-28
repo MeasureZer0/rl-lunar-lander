@@ -1,0 +1,41 @@
+[project]
+name = "neural-networks-project-3"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+# Enable basic checks and import sorting
+lint.select = [
+  "E",   # All errors
+  "F",   # All pyflakes checks (including unused imports)
+  "I",   # Import sorting checks
+  "B",   # All flake8-bugbear checks
+  "ANN", # All flake8-annotations checks
+]
+
+# Ignore line length violations.
+lint.ignore = ["E501"]
+
+# Allow unused variables when underscore-prefixed.
+lint.dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.per-file-ignores]
+# Allow unused imports in __init__.py files.
+"__init__.py" = ["F401"]
+
+[dependency-groups]
+dev = ["ipykernel>=7.2.0", "pyright>=1.1.408", "ruff>=0.15.5"]
+
+[tool.pyright]
+venvPath = "./.venv"
+typeCheckingMode = "standard"
+exclude = ["**/__pycache__", ".*", "**/.ipynb_checkpoints**"]
+include = [""]
+pythonPlatform = "All"
+pythonVersion = "3.13"
