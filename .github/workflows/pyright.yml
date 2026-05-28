@@ -1,0 +1,42 @@
+name: Pyright
+
+on: [push]
+
+jobs:
+  type-check:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache Virtual Environment
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
+
+      - name: Install dependencies
+        # uv will create a .venv if it doesn't exist
+        run: uv sync --frozen
+        env:
+          UV_LINK_MODE: "copy"
+
+      - name: Add .venv/bin to PATH
+        # This makes the python interpreter and installed libs visible to pyright
+        run: echo "$PWD/.venv/bin" >> $GITHUB_PATH
+
+      - uses: jakebailey/pyright-action@v3.0.2
+        with:
+          version: 1.1.408
+          python-version: ${{ matrix.python-version }}
+          pylance-version: latest-release
