@@ -1,22 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import cast
-
 import gymnasium as gym
-import numpy as np
 
-from agents import RandomAgent
+from agents import AgentProtocol, build_agent
+from training.checkpoint import CheckpointState, maybe_save_checkpoint
 from training.config import ExperimentConfig
-
-
-@dataclass(slots=True)
-class EpisodeMetrics:
-    episode: int
-    total_reward: float
-    steps: int
-    terminated: bool
-    truncated: bool
+from training.evaluate import (
+    evaluate_agent,
+    log_evaluation_summary,
+    log_training_episode,
+)
+from training.rollout import EpisodeMetrics, collect_episode
 
 
 class Trainer:
@@ -30,55 +24,60 @@ class Trainer:
         )
 
         try:
-            agent = self._build_agent(env)
-            metrics: list[EpisodeMetrics] = []
+            agent = build_agent(
+                config=self.config,
+                observation_space=env.observation_space,
+                action_space=env.action_space,
+            )
+            metrics_history: list[EpisodeMetrics] = []
+            checkpoint_state = CheckpointState()
 
             for episode in range(1, self.config.training.episodes + 1):
-                episode_seed = self.config.training.seed + episode - 1
-                observation, _info = env.reset(seed=episode_seed)
-                agent.reset()
-
-                total_reward = 0.0
-                steps = 0
-                terminated = False
-                truncated = False
-
-                for step in range(1, self.config.training.max_steps_per_episode + 1):
-                    action = agent.act(np.asarray(observation))
-                    observation, reward, terminated, truncated, _info = env.step(action)
-                    total_reward += float(reward)
-                    steps = step
-
-                    if terminated or truncated:
-                        break
-
-                episode_metrics = EpisodeMetrics(
+                episode_metrics = collect_episode(
+                    env=env,
+                    agent=agent,
                     episode=episode,
-                    total_reward=total_reward,
-                    steps=steps,
-                    terminated=terminated,
-                    truncated=truncated,
+                    seed=self.config.training.seed + episode - 1,
+                    max_steps=self.config.training.max_steps_per_episode,
                 )
-                metrics.append(episode_metrics)
+                metrics_history.append(episode_metrics)
 
+                update_metrics = self._run_update_loop(agent, episode)
                 if episode % self.config.training.log_every == 0 or episode == 1:
-                    print(
-                        "episode="
-                        f"{episode_metrics.episode} reward={episode_metrics.total_reward:.2f} "
-                        f"steps={episode_metrics.steps} terminated={episode_metrics.terminated} "
-                        f"truncated={episode_metrics.truncated}"
-                    )
+                    log_training_episode(episode_metrics, update_metrics)
 
-            return metrics
+                self._run_evaluation(agent, episode)
+                maybe_save_checkpoint(
+                    agent=agent,
+                    checkpoint_config=self.config.checkpoint,
+                    episode_metrics=episode_metrics,
+                    state=checkpoint_state,
+                )
+
+            return metrics_history
         finally:
             env.close()
 
-    def _build_agent(self, env: gym.Env[np.ndarray, int]) -> RandomAgent:
-        if self.config.agent.name != "random":
-            msg = f"Unsupported agent '{self.config.agent.name}'."
-            raise ValueError(msg)
+    def _run_update_loop(
+        self,
+        agent: AgentProtocol,
+        episode: int,
+    ) -> dict[str, float]:
+        if episode % self.config.training.update_every != 0:
+            return {}
+        return agent.update()
 
-        return RandomAgent(
-            action_space=cast(gym.spaces.Discrete, env.action_space),
-            seed=self.config.agent.seed,
+    def _run_evaluation(self, agent: AgentProtocol, episode: int) -> None:
+        if not self.config.evaluation.enabled:
+            return
+        if episode % self.config.evaluation.frequency != 0:
+            return
+
+        summary = evaluate_agent(
+            agent=agent,
+            env_config=self.config.env,
+            training_config=self.config.training,
+            evaluation_config=self.config.evaluation,
+            seed_offset=10_000 + episode,
         )
+        log_evaluation_summary(episode, summary)
