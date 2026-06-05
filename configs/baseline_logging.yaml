@@ -10,7 +10,7 @@ training:
   update_every: 1
 
 evaluation:
-  enabled: false
+  enabled: true
   episodes: 2
   frequency: 5
   render_mode: null
