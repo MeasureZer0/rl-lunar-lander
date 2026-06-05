@@ -1,7 +1,7 @@
 [project]
-name = "neural-networks-project-3"
+name = "rl-lunar-lander"
 version = "0.1.0"
-description = "Add your description here"
+description = "Implementation of reinforcement learning agents for the LunarLander environment."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
