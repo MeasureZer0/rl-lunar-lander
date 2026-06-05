@@ -1,5 +1,6 @@
 from training.config import ExperimentConfig, load_experiment_config
-from training.trainer import EpisodeMetrics, Trainer
+from training.rollout import EpisodeMetrics
+from training.trainer import Trainer
 
 __all__ = [
     "EpisodeMetrics",
