@@ -1,0 +1,13 @@
+env:
+  id: LunarLander-v3
+  render_mode: null
+
+agent:
+  name: random
+  seed: 42
+
+training:
+  episodes: 10
+  max_steps_per_episode: 1000
+  seed: 123
+  log_every: 1
