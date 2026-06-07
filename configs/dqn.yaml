@@ -1,0 +1,20 @@
+agent:
+  name: dqn
+  seed: 42
+  agent_config: agents/dqn.yaml
+
+env:
+  id: LunarLander-v3
+
+training:
+  episodes: 1000
+  max_steps_per_episode: 1000
+  seed: 42
+  log_every: 10
+  update_every: 1
+
+checkpoint:
+  enabled: true
+  directory: checkpoints
+  frequency: 50
+  save_best: true
