@@ -1,0 +1,8 @@
+agent:
+  name: reinforce
+  seed: 42
+  reinforce:
+    learning_rate: 0.001
+    gamma: 0.99
+    hidden_dim: 128
+    batch_episodes: 4

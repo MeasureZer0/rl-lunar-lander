@@ -1,0 +1,24 @@
+env:
+  id: LunarLander-v3
+  render_mode: null
+
+training:
+  episodes: 1000
+  max_steps_per_episode: 1000
+  seed: 123
+  log_every: 1000
+  update_every: 1
+
+evaluation:
+  enabled: true
+  episodes: 2
+  frequency: 5
+  render_mode: null
+
+checkpoint:
+  enabled: true
+  directory: checkpoints
+  frequency: 5
+  save_best: true
+
+agent_config: agents/random.yaml
