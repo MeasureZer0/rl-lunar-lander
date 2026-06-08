@@ -3,8 +3,8 @@ from __future__ import annotations
 import dataclasses
 
 import gymnasium as gym
-import wandb
 
+import wandb
 from agents import AgentProtocol, build_agent
 from training.checkpoint import CheckpointState, maybe_save_checkpoint
 from training.config import ExperimentConfig

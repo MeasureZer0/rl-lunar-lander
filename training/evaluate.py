@@ -5,8 +5,8 @@ from statistics import mean
 
 import gymnasium as gym
 import numpy as np
-import wandb
 
+import wandb
 from agents.protocol import AgentProtocol
 from training.config import EnvConfig, EvaluationConfig, TrainingConfig
 from training.rollout import EpisodeMetrics
