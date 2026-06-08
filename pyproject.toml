@@ -1,13 +1,15 @@
 [project]
-name = "neural-networks-project-3"
+name = "rl-lunar-lander"
 version = "0.1.0"
-description = "Add your description here"
+description = "Implementation of reinforcement learning agents for the LunarLander environment."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
   "box2d>=2.3.10",
   "gymnasium>=1.3.0",
+  "omegaconf>=2.3.0",
   "pygame>=2.6.1",
+  "pyyaml>=6.0.3",
   "swig>=4.4.1",
   "torch>=2.12.0",
   "tqdm>=4.67.3",
