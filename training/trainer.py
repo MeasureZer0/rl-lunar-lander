@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import dataclasses
+
 import gymnasium as gym
+import wandb
 
 from agents import AgentProtocol, build_agent
 from training.checkpoint import CheckpointState, maybe_save_checkpoint
@@ -18,6 +21,14 @@ class Trainer:
         self.config = config
 
     def run(self) -> list[EpisodeMetrics]:
+        if self.config.wandb.enabled:
+            wandb.init(
+                project=self.config.wandb.project,
+                entity=self.config.wandb.entity,
+                name=self.config.wandb.name,
+                tags=self.config.wandb.tags,
+                config=dataclasses.asdict(self.config),
+            )
         env = gym.make(
             self.config.env.id,
             render_mode=self.config.env.render_mode,
@@ -57,6 +68,8 @@ class Trainer:
             return metrics_history
         finally:
             env.close()
+            if wandb.run is not None:
+                wandb.finish()
 
     def _run_update_loop(
         self,

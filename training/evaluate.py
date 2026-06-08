@@ -5,6 +5,7 @@ from statistics import mean
 
 import gymnasium as gym
 import numpy as np
+import wandb
 
 from agents.protocol import AgentProtocol
 from training.config import EnvConfig, EvaluationConfig, TrainingConfig
@@ -64,6 +65,13 @@ def log_training_episode(
         f"steps={metrics.steps} terminated={metrics.terminated} "
         f"truncated={metrics.truncated}{suffix}"
     )
+    if wandb.run is not None:
+        log_data = {
+            "train/reward": metrics.total_reward,
+            "train/steps": metrics.steps,
+            **{f"train/{k}": v for k, v in update_metrics.items()},
+        }
+        wandb.log(log_data, step=metrics.episode)
 
 
 def log_evaluation_summary(
@@ -75,6 +83,14 @@ def log_evaluation_summary(
         f"{episode} avg_reward={summary.avg_reward:.2f} "
         f"avg_steps={summary.avg_steps:.2f} episodes={summary.episodes}"
     )
+    if wandb.run is not None:
+        wandb.log(
+            {
+                "eval/avg_reward": summary.avg_reward,
+                "eval/avg_steps": summary.avg_steps,
+            },
+            step=episode,
+        )
 
 
 def _run_eval_episode(
