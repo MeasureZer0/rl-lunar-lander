@@ -10,7 +10,7 @@ training:
   update_every: 1
 
 evaluation:
-  enabled: false
+  enabled: true
   episodes: 2
   frequency: 5
   render_mode: null
@@ -20,5 +20,17 @@ checkpoint:
   directory: checkpoints
   frequency: 5
   save_best: true
+
+wandb:
+  enabled: true
+  project: "rl-lunar-lander"
+  name: baseline
+  tags: ["baseline", "reinforce"]
+
+optimize:
+  enabled: true
+  n_trials: 50
+  direction: "maximize"
+  study_name: "lunar-lander-tuning"
 
 agent_config: agents/random.yaml

@@ -6,6 +6,7 @@ import sys
 import optuna
 from optuna.integration.wandb import WeightsAndBiasesCallback  # type: ignore[no-redef]
 
+import wandb
 from training import load_experiment_config
 from training.optuna_search import run_trial
 
@@ -34,22 +35,24 @@ def main() -> int:
     n_trials = base_config.optimize.n_trials
     direction = base_config.optimize.direction
 
+    if base_config.wandb.enabled:
+        wandb.init(
+            project=base_config.wandb.project,
+            entity=base_config.wandb.entity
+            if hasattr(base_config.wandb, "entity")
+            else None,
+            name=study_name,
+            group="hpo",
+            tags=["optuna"] + base_config.wandb.tags,
+            config={"base_config": args.config, "n_trials": n_trials},
+        )
+
     callbacks = []
 
-    # Configure unified W&B logging for the whole Optuna study
     if base_config.wandb.enabled:
-        wandb_kwargs = {
-            "project": base_config.wandb.project,
-            "name": study_name,
-            "tags": ["optuna"] + base_config.wandb.tags,
-            "config": {"base_config": args.config},
-        }
-        if base_config.wandb.entity:
-            wandb_kwargs["entity"] = base_config.wandb.entity
-
         wandb_callback = WeightsAndBiasesCallback(
             metric_name="avg_reward",
-            wandb_kwargs=wandb_kwargs,
+            wandb_kwargs={"reinit": False},
         )
         callbacks.append(wandb_callback)
 
@@ -71,7 +74,18 @@ def main() -> int:
 
     if not study.trials:
         print("No trials completed.")
+        if base_config.wandb.enabled:
+            wandb.finish()
         return 1
+
+    if base_config.wandb.enabled and wandb.run is not None:
+        wandb.log(
+            {
+                "best_value": study.best_value,
+                **{f"best_param/{k}": v for k, v in study.best_params.items()},
+            }
+        )
+        wandb.finish()
 
     print("\noptimization_complete=true")
     print(f"trials_completed={len(study.trials)}")
