@@ -39,19 +39,77 @@ class ReinforceAgent:
         )
 
     def act(self, observation: np.ndarray, *, explore: bool = True) -> int:
-        del observation
-        del explore
-        return int(self._rng.integers(self.action_space.n))
+
+        observation_tensor = torch.as_tensor(
+            observation, dtype=torch.float32
+        ).unsqueeze(0)
+
+        with torch.no_grad():
+            logits = self._policy(observation_tensor)
+
+        distribution = torch.distributions.Categorical(logits=logits)
+
+        if explore:
+            action = distribution.sample()
+        else:
+            action = torch.argmax(logits, dim=-1)
+
+        return int(action.item())
 
     def observe(self, transition: Transition) -> None:
         self._buffer.add(transition)
 
+    def _compute_returns(self) -> torch.Tensor:
+        transitions = self._buffer.get_items()
+
+        returns = []
+        running_return = 0.0
+
+        for transition in reversed(transitions):
+            if transition.terminated or transition.truncated:
+                running_return = 0.0
+
+            running_return = transition.reward + self.config.gamma * running_return
+            returns.append(running_return)
+
+        returns.reverse()
+
+        return torch.tensor(returns, dtype=torch.float32)
+
     def update(self) -> dict[str, float]:
-        trajectory_count = len(self._buffer)
+        transitions = self._buffer.get_items()
+
+        if not transitions:
+            return {"loss": 0.0, "avg_return": 0.0, "trajectories_collected": 0.0}
+
+        observations = torch.as_tensor(
+            np.stack([transition.observation for transition in transitions]),
+            dtype=torch.float32,
+        )
+
+        actions = torch.as_tensor(
+            [transition.action for transition in transitions], dtype=torch.int64
+        )
+
+        returns = self._compute_returns()
+        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+        logits = self._policy(observations)
+        distribution = torch.distributions.Categorical(logits=logits)
+        log_probs = distribution.log_prob(actions)
+        loss = -(log_probs * returns).mean()
+
+        self._optimizer.zero_grad()
+        loss.backward()
+        self._optimizer.step()
+
+        avg_return = float(returns.mean().item())
+
+        transition_count = len(transitions)
         self._buffer.clear()
         return {
             "placeholder_loss": 0.0,
-            "trajectories_collected": float(trajectory_count),
+            "avg_return": avg_return,
+            "trajectories_collected": float(transition_count),
         }
 
     def reset(self) -> None:
