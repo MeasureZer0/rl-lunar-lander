@@ -107,7 +107,7 @@ class ReinforceAgent:
         transition_count = len(transitions)
         self._buffer.clear()
         return {
-            "placeholder_loss": 0.0,
+            "loss": float(loss.item()),
             "avg_return": avg_return,
             "trajectories_collected": float(transition_count),
         }
