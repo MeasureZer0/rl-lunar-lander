@@ -6,6 +6,7 @@ import gymnasium as gym
 import numpy as np
 
 from agents.baseline_agent import RandomAgent
+from agents.dqn_agent import DQNAgent
 from agents.protocol import AgentProtocol
 from agents.reinforce_agent import ReinforceAgent
 from training.config import ExperimentConfig
@@ -40,6 +41,14 @@ def build_agent(
             observation_dim=observation_dim,
             seed=config.agent.seed,
             config=config.agent.reinforce,
+        )
+
+    if config.agent.name == "dqn":
+        return DQNAgent(
+            action_space=discrete_action_space,
+            observation_dim=observation_dim,
+            seed=config.agent.seed,
+            config=config.agent.dqn,
         )
 
     msg = f"Unsupported agent '{config.agent.name}'."
