@@ -4,11 +4,11 @@ from typing import cast
 
 import gymnasium as gym
 import numpy as np
+from training.config import ExperimentConfig
 
 from agents.baseline_agent import RandomAgent
 from agents.protocol import AgentProtocol
 from agents.reinforce_agent import ReinforceAgent
-from training.config import ExperimentConfig
 
 
 def build_agent(

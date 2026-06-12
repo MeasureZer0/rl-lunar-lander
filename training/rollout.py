@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 import gymnasium as gym
 import numpy as np
-
 from agents.protocol import AgentProtocol
+
 from training.buffers import Transition
 
 

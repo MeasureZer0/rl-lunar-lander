@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents.protocol import AgentProtocol
+
 from training.config import CheckpointConfig
 from training.rollout import EpisodeMetrics
 

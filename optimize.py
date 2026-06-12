@@ -4,9 +4,8 @@ import argparse
 import sys
 
 import optuna
-from optuna.integration.wandb import WeightsAndBiasesCallback  # type: ignore[no-redef]
-
 import wandb
+from optuna.integration.wandb import WeightsAndBiasesCallback  # type: ignore[no-redef]
 from training import load_experiment_config
 from training.optuna_search import run_trial
 
