@@ -14,6 +14,7 @@ dependencies = [
   "swig>=4.4.1",
   "torch>=2.12.0",
   "tqdm>=4.67.3",
+  "wandb>=0.27.2",
 ]
 
 [[tool.uv.index]]
@@ -37,23 +38,17 @@ torchvision = [
 ]
 
 [tool.ruff]
+
+src = ["training", "agents"]
+
 line-length = 88
 target-version = "py313"
 
-# Enable basic checks and import sorting
-lint.select = [
-  "E",   # All errors
-  "F",   # All pyflakes checks (including unused imports)
-  "I",   # Import sorting checks
-  "B",   # All flake8-bugbear checks
-  "ANN", # All flake8-annotations checks
-]
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "ANN"]
+ignore = ["E501"]
 
-# Ignore line length violations.
-lint.ignore = ["E501"]
-
-# Allow unused variables when underscore-prefixed.
-lint.dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 [tool.ruff.lint.per-file-ignores]
 # Allow unused imports in __init__.py files.

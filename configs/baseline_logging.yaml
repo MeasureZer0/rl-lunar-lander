@@ -6,7 +6,7 @@ training:
   episodes: 1000
   max_steps_per_episode: 1000
   seed: 123
-  log_every: 1000
+  log_every: 20
   update_every: 1
 
 evaluation:
@@ -20,5 +20,17 @@ checkpoint:
   directory: checkpoints
   frequency: 5
   save_best: true
+
+wandb:
+  enabled: true
+  project: "rl-lunar-lander"
+  name: baseline
+  tags: ["baseline", "random"]
+
+optimize:
+  enabled: true
+  n_trials: 50
+  direction: "maximize"
+  study_name: "lunar-lander-tuning"
 
 agent_config: agents/random.yaml

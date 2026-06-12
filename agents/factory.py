@@ -43,6 +43,7 @@ def build_agent(
             config=config.agent.reinforce,
         )
 
+<<<<<<< HEAD
     if config.agent.name == "dqn":
         return DQNAgent(
             action_space=discrete_action_space,
@@ -51,5 +52,7 @@ def build_agent(
             config=config.agent.dqn,
         )
 
+=======
+>>>>>>> main
     msg = f"Unsupported agent '{config.agent.name}'."
     raise ValueError(msg)
