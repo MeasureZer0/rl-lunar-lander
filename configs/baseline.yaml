@@ -25,7 +25,7 @@ wandb:
   enabled: true
   project: "rl-lunar-lander"
   name: baseline
-  tags: ["baseline", "reinforce"]
+  tags: ["baseline", "random"]
 
 optimize:
   enabled: true
