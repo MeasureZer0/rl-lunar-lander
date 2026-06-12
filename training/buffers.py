@@ -44,3 +44,6 @@ class TrajectoryBuffer:
 
     def __len__(self) -> int:
         return len(self._items)
+
+    def get_items(self) -> list[Transition]:
+        return self._items

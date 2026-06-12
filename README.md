@@ -36,7 +36,7 @@ Important files and folders:
 
   Current contents:
   - `baseline_agent.py`: random discrete-action baseline
-  - `reinforce_agent.py`: placeholder REINFORCE agent scaffold
+  - `reinforce_agent.py`: REINFORCE agent implementation
   - `factory.py`: builds the agent from config
   - `protocol.py`: common interface expected by the trainer
 
@@ -130,7 +130,7 @@ Use it when:
 
 File: `agents/reinforce_agent.py`
 
-This is a scaffold, not a real REINFORCE implementation yet.
+Implementation of the REINFORCE policy-gradient algorithm with a neural-network policy. The agent learns from discounted returns computed from collected trajectories.
 
 ## Configuration System
 
