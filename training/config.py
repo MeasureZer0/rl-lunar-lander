@@ -61,11 +61,31 @@ class CheckpointConfig:
 
 
 @dataclass(slots=True)
+class WandbConfig:
+    enabled: bool = False
+    project: str = "rl-lunar-lander"
+    entity: str | None = None
+    name: str | None = None
+    tags: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class OptimizeConfig:
+    enabled: bool = False
+    project: str = "rl-lunar-lander"
+    n_trials: int = 20
+    direction: str = "maximize"
+    study_name: str | None = None
+
+
+@dataclass(slots=True)
 class ExperimentConfig:
     env: EnvConfig = field(default_factory=EnvConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
+    wandb: WandbConfig = field(default_factory=WandbConfig)
+    optimize: OptimizeConfig = field(default_factory=OptimizeConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     agent_config: str | None = None
 

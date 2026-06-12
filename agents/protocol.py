@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Protocol
 
 import numpy as np
-
 from training.buffers import Transition
 
 

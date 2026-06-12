@@ -7,7 +7,6 @@ from typing import cast
 
 import gymnasium as gym
 import numpy as np
-
 from training.buffers import Transition
 
 
