@@ -16,7 +16,7 @@ evaluation:
   render_mode: null
 
 checkpoint:
-  enabled: false
+  enabled: true
   directory: checkpoints
   frequency: 5
   save_best: true

@@ -28,11 +28,26 @@ class ReinforceAgentConfig:
 
 
 @dataclass(slots=True)
+class DQNAgentConfig:
+    learning_rate: float = 1e-3
+    gamma: float = 0.99
+    hidden_dim: int = 128
+    buffer_capacity: int = 50_000
+    batch_size: int = 64
+    target_update_frequency: int = 100
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.05
+    epsilon_decay: float = 0.995
+    min_buffer_size: int = 1_000
+
+
+@dataclass(slots=True)
 class AgentConfig:
     name: str = MISSING
     seed: int | None = None
     random: RandomAgentConfig = field(default_factory=RandomAgentConfig)
     reinforce: ReinforceAgentConfig = field(default_factory=ReinforceAgentConfig)
+    dqn: DQNAgentConfig = field(default_factory=DQNAgentConfig)
 
 
 @dataclass(slots=True)

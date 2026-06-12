@@ -10,7 +10,6 @@ dependencies = [
   "matplotlib>=3.10.9",
   "omegaconf>=2.3.0",
   "optuna>=4.9.0",
-  "optuna-integration[wandb]>=4.9.0",
   "pygame>=2.6.1",
   "pyyaml>=6.0.3",
   "swig>=4.4.1",
