@@ -1,8 +1,3 @@
-agent:
-  name: dqn
-  seed: 42
-  agent_config: agents/dqn.yaml
-
 env:
   id: LunarLander-v3
 
@@ -18,3 +13,17 @@ checkpoint:
   directory: checkpoints
   frequency: 50
   save_best: true
+
+wandb:
+  enabled: true
+  project: "rl-lunar-lander"
+  name: baseline
+  tags: ["baseline", "dqn"]
+
+optimize:
+  enabled: true
+  n_trials: 50
+  direction: "maximize"
+  study_name: "lunar-lander-tuning"
+
+agent_config: agents/dqn.yaml
