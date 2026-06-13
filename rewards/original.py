@@ -1,0 +1,1 @@
+from rewards.shaping import DEFAULT_WEIGHTS, ShapedLunarLander, shape  # noqa: F401
