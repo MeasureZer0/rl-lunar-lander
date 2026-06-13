@@ -92,6 +92,15 @@ class OptimizeConfig:
     direction: str = "maximize"
     study_name: str | None = None
 
+@dataclass
+class RewardShapingConfig:
+    enabled: bool = True
+    w_align: float = 0.3
+    w_tilt: float = 0.2
+    w_soft: float = 0.5
+    w_hover: float = 0.05
+    w_leg_sym: float = 0.1
+
 
 @dataclass(slots=True)
 class ExperimentConfig:
