@@ -64,7 +64,7 @@ class ShapedLunarLander(gym.Wrapper):
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         self._last_action = action
         obs, reward, terminated, truncated, info = self.env.step(action)
-        shaped_reward = shape(obs=obs, reward=reward, terminated=terminated,
+        shaped_reward = shape(obs=obs, reward=float(reward), terminated=terminated,
                               truncated=truncated, action=action, weights=self.weights)
         info["original_reward"] = reward
         return obs, shaped_reward, terminated, truncated, info
