@@ -8,6 +8,9 @@ w_leg_sym - reward both legs making contact at the same time (+0.1 per step)
 
 from __future__ import annotations
 
+from typing import Any
+
+import gymnasium as gym
 import numpy as np
 
 DEFAULT_WEIGHTS: dict[str, float] = {
@@ -52,34 +55,16 @@ def shape(
 
     return reward + shaping
 
-class ShapedLunarLander:
-    def __init__(self, env, weights: dict[str, float] | None = None) -> None:  # noqa: ANN001, F821
-        self.env = env
+class ShapedLunarLander(gym.Wrapper):
+    def __init__(self, env: gym.Env, weights: dict[str, float] | None = None) -> None:
+        super().__init__(env)
         self.weights = weights
-        self._last_action: int = 0
+        self._last_action = 0
 
-    def reset(self, **kwargs: any) -> tuple[np.ndarray, dict]:
-        return self.env.reset(**kwargs)
-
-    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
+    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         self._last_action = action
         obs, reward, terminated, truncated, info = self.env.step(action)
-        shaped_reward = shape(
-            obs=obs,
-            reward=reward,
-            terminated=terminated,
-            truncated=truncated,
-            action=action,
-            weights=self.weights,
-        )
+        shaped_reward = shape(obs=obs, reward=reward, terminated=terminated,
+                              truncated=truncated, action=action, weights=self.weights)
         info["original_reward"] = reward
         return obs, shaped_reward, terminated, truncated, info
-
-    def render(self) -> None:
-        return self.env.render()
-
-    def close(self) -> None:
-        return self.env.close()
-
-    def __getattr__(self, name: str) -> any:
-        return getattr(self.env, name)
