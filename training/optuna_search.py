@@ -38,6 +38,13 @@ def run_trial(trial: optuna.Trial, base_config: ExperimentConfig) -> float:
         config.agent.dqn.target_update_frequency = trial.suggest_categorical(
             "target_update_frequency", [50, 100, 200]
         )
+    
+    if config.reward_shaping.enabled:
+        config.reward_shaping.w_align = trial.suggest_float("w_align", 0.0, 1.0)
+        config.reward_shaping.w_tilt = trial.suggest_float("w_tilt", 0.0, 0.5)
+        config.reward_shaping.w_soft = trial.suggest_float("w_soft", 0.0, 1.0)
+        config.reward_shaping.w_hover = trial.suggest_float("w_hover", 0.0, 0.2)
+        config.reward_shaping.w_leg_sym = trial.suggest_float("w_leg_sym", 0.0, 0.3)
 
     config.wandb.enabled = False
     config.checkpoint.enabled = False

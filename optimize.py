@@ -17,6 +17,12 @@ def parse_args() -> argparse.Namespace:
         default="configs/baseline.yaml",
         help="Path to the base YAML experiment config.",
     )
+    parser.add_argument(
+        "--reward-shaping",
+        action="store_true",
+        default=False,
+        help="Enable reward shaping during optimization.",
+    )
     return parser.parse_args()
 
 
@@ -24,6 +30,7 @@ def main() -> int:
     args = parse_args()
     try:
         base_config = load_experiment_config(args.config)
+        base_config.reward_shaping.enabled = args.reward_shaping
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 1
