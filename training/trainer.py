@@ -19,6 +19,7 @@ from training.rollout import EpisodeMetrics, collect_episode
 class Trainer:
     def __init__(self, config: ExperimentConfig) -> None:
         self.config = config
+        self.agent: AgentProtocol | None = None
 
     def run(self) -> list[EpisodeMetrics]:
         if self.config.wandb.enabled:
@@ -40,6 +41,7 @@ class Trainer:
                 observation_space=env.observation_space,
                 action_space=env.action_space,
             )
+            self.agent = agent
             metrics_history: list[EpisodeMetrics] = []
             checkpoint_state = CheckpointState()
 

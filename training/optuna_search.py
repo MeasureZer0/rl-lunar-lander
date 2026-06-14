@@ -1,48 +1,53 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 from statistics import mean
+from typing import Protocol, SupportsInt, cast
 
+import matplotlib.pyplot as plt
+import numpy as np
 import optuna
+import wandb
 
 from training.config import ExperimentConfig
 from training.trainer import Trainer
+
+
+class ArchitectureDebugAgent(Protocol):
+    def parameter_count(self) -> int: ...
+
+    def hidden_activation_snapshot(self, observations: np.ndarray) -> np.ndarray: ...
+
+
+class NetworkArchitectureConfig(Protocol):
+    hidden_layers: list[int]
+    activation: str
+    weight_init: str
+    normalization: str | None
+    normalization_position: str
+    dropout: float
 
 
 def run_trial(trial: optuna.Trial, base_config: ExperimentConfig) -> float:
     config = copy.deepcopy(base_config)
 
     if config.agent.name == "reinforce":
-        config.agent.reinforce.learning_rate = trial.suggest_float(
-            "learning_rate", 1e-4, 1e-2, log=True
-        )
-        config.agent.reinforce.gamma = trial.suggest_float("gamma", 0.90, 0.999)
-        config.agent.reinforce.hidden_dim = trial.suggest_categorical(
-            "hidden_dim", [64, 128, 256]
-        )
-
+        if config.optimize.mode == "architecture":
+            _sample_reinforce_architecture_config(trial, config)
+        else:
+            _sample_reinforce_hyperparameter_config(trial, config)
     elif config.agent.name == "dqn":
-        config.agent.dqn.learning_rate = trial.suggest_float(
-            "learning_rate", 1e-4, 1e-2, log=True
-        )
-        config.agent.dqn.gamma = trial.suggest_float("gamma", 0.90, 0.999)
-        config.agent.dqn.hidden_dim = trial.suggest_categorical(
-            "hidden_dim", [64, 128, 256]
-        )
-        config.agent.dqn.batch_size = trial.suggest_categorical(
-            "batch_size", [32, 64, 128]
-        )
-        config.agent.dqn.epsilon_decay = trial.suggest_float(
-            "epsilon_decay", 0.990, 0.9999
-        )
-        config.agent.dqn.target_update_frequency = trial.suggest_categorical(
-            "target_update_frequency", [50, 100, 200]
-        )
+        if config.optimize.mode == "architecture":
+            _sample_dqn_architecture_config(trial, config)
+        else:
+            _sample_dqn_hyperparameter_config(trial, config)
 
-    config.wandb.enabled = False
-    config.checkpoint.enabled = False
     config.env.render_mode = None
     config.evaluation.render_mode = None
+    config.wandb.name = f"{config.optimize.mode}-trial-{trial.number}"
+    config.wandb.tags = [*config.wandb.tags, "optuna", config.optimize.mode]
+    config.checkpoint.enabled = False
 
     trainer = Trainer(config)
     metrics = trainer.run()
@@ -50,7 +55,351 @@ def run_trial(trial: optuna.Trial, base_config: ExperimentConfig) -> float:
     if not metrics:
         return float("-inf")
 
-    recent_metrics = metrics[-10:]
-    rewards = [item.total_reward for item in recent_metrics]
+    rewards = [item.total_reward for item in metrics[-10:]]
+    avg_reward = mean(rewards)
 
-    return mean(rewards)
+    agent = trainer.agent
+    if agent is not None and hasattr(agent, "parameter_count"):
+        debug_agent = cast(ArchitectureDebugAgent, agent)
+        parameter_count = debug_agent.parameter_count()
+        trial.set_user_attr("parameter_count", parameter_count)
+        if wandb.run is not None:
+            wandb.log({"model/parameter_count": parameter_count})
+
+    if (
+        config.optimize.mode == "architecture"
+        and agent is not None
+        and hasattr(agent, "hidden_activation_snapshot")
+    ):
+        _log_hidden_activation_heatmap(cast(ArchitectureDebugAgent, agent), trial)
+
+    return avg_reward
+
+
+def save_best_checkpoint(
+    study: optuna.Study,
+    base_config: ExperimentConfig,
+    *,
+    filename: str,
+) -> Path:
+    config = copy.deepcopy(base_config)
+    _apply_best_params(config, study.best_params)
+    config.wandb.enabled = False
+    config.checkpoint.enabled = False
+    config.env.render_mode = None
+    config.evaluation.render_mode = None
+
+    trainer = Trainer(config)
+    trainer.run()
+    if trainer.agent is None:
+        msg = "Cannot save checkpoint because training did not create an agent."
+        raise RuntimeError(msg)
+
+    checkpoint_path = Path(config.optimize.checkpoint_directory) / filename
+    trainer.agent.save(checkpoint_path)
+    return checkpoint_path
+
+
+def log_architecture_plots(study: optuna.Study) -> None:
+    if wandb.run is None:
+        return
+
+    xs: list[int] = []
+    ys: list[float] = []
+    for trial in study.trials:
+        if trial.value is None:
+            continue
+        parameter_count = trial.user_attrs.get("parameter_count")
+        if parameter_count is None:
+            continue
+        xs.append(int(parameter_count))
+        ys.append(float(trial.value))
+
+    if not xs:
+        return
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.scatter(xs, ys)
+    ax.set_xlabel("parameter_count")
+    ax.set_ylabel("avg_reward")
+    ax.set_title("Architecture size vs reward")
+    ax.grid(alpha=0.25)
+    wandb.log({"architecture/params_vs_avg_reward": wandb.Image(fig)})
+    plt.close(fig)
+
+
+def _sample_reinforce_hyperparameter_config(
+    trial: optuna.Trial,
+    config: ExperimentConfig,
+) -> None:
+    reinforce = config.agent.reinforce
+    reinforce.learning_rate = trial.suggest_categorical(
+        "learning_rate",
+        [1e-4, 5e-4, 1e-3],
+    )
+    reinforce.gamma = trial.suggest_categorical("gamma", [0.95, 0.99, 0.999])
+    reinforce.batch_episodes = trial.suggest_categorical(
+        "batch_episodes",
+        [1, 2, 4, 8],
+    )
+    reinforce.gradient_clip_max_norm = cast(
+        float | None,
+        trial.suggest_categorical(
+            "gradient_clip_max_norm",
+            [None, 1.0, 5.0, 10.0],
+        ),
+    )
+
+
+def _sample_dqn_hyperparameter_config(
+    trial: optuna.Trial,
+    config: ExperimentConfig,
+) -> None:
+    dqn = config.agent.dqn
+    dqn.learning_rate = trial.suggest_categorical(
+        "learning_rate",
+        [1e-4, 5e-4, 1e-3],
+    )
+    dqn.gamma = trial.suggest_categorical("gamma", [0.95, 0.99, 0.999])
+    dqn.batch_size = trial.suggest_categorical("batch_size", [32, 64, 128, 256])
+    dqn.buffer_capacity = trial.suggest_categorical(
+        "buffer_capacity",
+        [5_000, 10_000, 50_000, 100_000],
+    )
+    dqn.min_buffer_size = min(dqn.min_buffer_size, dqn.buffer_capacity)
+    _sample_epsilon_schedule(trial, config)
+    _sample_target_update(trial, config)
+    _sample_lr_scheduler(trial, config)
+    dqn.gradient_clip_max_norm = cast(
+        float | None,
+        trial.suggest_categorical(
+            "gradient_clip_max_norm",
+            [None, 1.0, 5.0, 10.0],
+        ),
+    )
+
+
+def _sample_dqn_architecture_config(
+    trial: optuna.Trial,
+    config: ExperimentConfig,
+) -> None:
+    dqn = config.agent.dqn
+    _sample_network_architecture(trial, dqn)
+    dqn.hidden_dim = dqn.hidden_layers[0]
+
+
+def _sample_reinforce_architecture_config(
+    trial: optuna.Trial,
+    config: ExperimentConfig,
+) -> None:
+    reinforce = config.agent.reinforce
+    _sample_network_architecture(trial, reinforce)
+    reinforce.hidden_dim = reinforce.hidden_layers[0]
+    reinforce.batch_episodes = trial.suggest_categorical(
+        "batch_episodes",
+        [1, 2, 4, 8],
+    )
+
+
+def _sample_epsilon_schedule(
+    trial: optuna.Trial,
+    config: ExperimentConfig,
+) -> None:
+    dqn = config.agent.dqn
+    dqn.epsilon_schedule = trial.suggest_categorical(
+        "epsilon_schedule",
+        ["linear", "exponential", "cosine"],
+    )
+    dqn.epsilon_end = 0.01
+    if dqn.epsilon_schedule == "linear":
+        dqn.epsilon_decay_episodes = trial.suggest_categorical(
+            "epsilon_decay_steps",
+            [100, 300, 500, 1_000],
+        )
+    elif dqn.epsilon_schedule == "exponential":
+        dqn.epsilon_decay = trial.suggest_categorical(
+            "epsilon_decay",
+            [0.99, 0.995, 0.999],
+        )
+    else:
+        dqn.epsilon_decay_episodes = trial.suggest_categorical(
+            "epsilon_decay_steps",
+            [100, 300, 500, 1_000],
+        )
+
+
+def _sample_target_update(
+    trial: optuna.Trial,
+    config: ExperimentConfig,
+) -> None:
+    dqn = config.agent.dqn
+    dqn.target_update_type = trial.suggest_categorical(
+        "target_update_type",
+        ["hard", "soft"],
+    )
+    if dqn.target_update_type == "hard":
+        dqn.target_update_frequency = trial.suggest_categorical(
+            "target_update_frequency",
+            [50, 100, 200, 500],
+        )
+    else:
+        dqn.tau = trial.suggest_categorical("tau", [0.001, 0.005, 0.01])
+
+
+def _sample_lr_scheduler(
+    trial: optuna.Trial,
+    config: ExperimentConfig,
+) -> None:
+    scheduler = cast(
+        str | None,
+        trial.suggest_categorical(
+            "lr_scheduler",
+            [None, "step", "plateau"],
+        ),
+    )
+    config.agent.dqn.lr_scheduler = scheduler
+    if scheduler == "step":
+        config.agent.dqn.step_lr_step_size = 100
+        config.agent.dqn.step_lr_gamma = 0.9
+    elif scheduler == "plateau":
+        config.agent.dqn.reduce_lr_patience = 20
+
+
+def _apply_best_params(
+    config: ExperimentConfig,
+    params: dict[str, object],
+) -> None:
+    dqn = config.agent.dqn
+    reinforce = config.agent.reinforce
+    for key, value in params.items():
+        if key in {"architecture_family", "epsilon_decay_steps"}:
+            continue
+        if key == "width":
+            width = int(cast(SupportsInt, value))
+            _set_hidden_layers(config, [width, width])
+        elif key == "depth":
+            _set_hidden_layers(config, _depth_layers(str(value)))
+        elif key == "normalization_variant":
+            _apply_normalization_variant(config, str(value))
+        elif config.agent.name == "reinforce" and hasattr(reinforce, key):
+            setattr(reinforce, key, value)
+        elif config.agent.name == "dqn" and hasattr(dqn, key):
+            setattr(dqn, key, value)
+
+    if params.get("epsilon_schedule") == "linear":
+        dqn.epsilon_end = 0.01
+        dqn.epsilon_decay_episodes = int(
+            cast(SupportsInt, params.get("epsilon_decay_steps", 300))
+        )
+    if params.get("epsilon_schedule") == "cosine":
+        dqn.epsilon_end = 0.01
+        dqn.epsilon_decay_episodes = int(
+            cast(SupportsInt, params.get("epsilon_decay_steps", 300))
+        )
+    if params.get("epsilon_schedule") == "exponential":
+        dqn.epsilon_end = 0.01
+        dqn.epsilon_decay = float(
+            cast(float, params.get("epsilon_decay", 0.995))
+        )
+
+
+def _sample_network_architecture(
+    trial: optuna.Trial,
+    network_config: NetworkArchitectureConfig,
+) -> None:
+    family = trial.suggest_categorical("architecture_family", ["width", "depth"])
+    if family == "width":
+        width = trial.suggest_categorical("width", [32, 64, 128, 256, 512])
+        network_config.hidden_layers = [width, width]
+    else:
+        depth = trial.suggest_categorical(
+            "depth",
+            ["1x256", "2x128", "3x64", "4x32"],
+        )
+        network_config.hidden_layers = _depth_layers(str(depth))
+
+    network_config.activation = trial.suggest_categorical(
+        "activation",
+        ["relu", "leaky_relu", "elu", "selu", "tanh"],
+    )
+    network_config.weight_init = trial.suggest_categorical(
+        "weight_init",
+        ["he", "xavier", "orthogonal"],
+    )
+    norm_variant = trial.suggest_categorical(
+        "normalization_variant",
+        ["none", "bn_before", "bn_after", "layer", "dropout"],
+    )
+    _apply_network_normalization_variant(network_config, str(norm_variant))
+
+
+def _set_hidden_layers(config: ExperimentConfig, hidden_layers: list[int]) -> None:
+    if config.agent.name == "reinforce":
+        config.agent.reinforce.hidden_layers = hidden_layers
+        config.agent.reinforce.hidden_dim = hidden_layers[0]
+    else:
+        config.agent.dqn.hidden_layers = hidden_layers
+        config.agent.dqn.hidden_dim = hidden_layers[0]
+
+
+def _apply_normalization_variant(
+    config: ExperimentConfig,
+    variant: str,
+) -> None:
+    network_config = (
+        config.agent.reinforce if config.agent.name == "reinforce" else config.agent.dqn
+    )
+    _apply_network_normalization_variant(network_config, variant)
+
+
+def _apply_network_normalization_variant(
+    network_config: NetworkArchitectureConfig,
+    variant: str,
+) -> None:
+    network_config.normalization = None
+    network_config.dropout = 0.0
+    if variant == "bn_before":
+        network_config.normalization = "batch"
+        network_config.normalization_position = "before_activation"
+    elif variant == "bn_after":
+        network_config.normalization = "batch"
+        network_config.normalization_position = "after_activation"
+    elif variant == "layer":
+        network_config.normalization = "layer"
+    elif variant == "dropout":
+        network_config.dropout = 0.1
+
+
+def _depth_layers(depth: str) -> list[int]:
+    mapping = {
+        "1x256": [256],
+        "2x128": [128, 128],
+        "3x64": [64, 64, 64],
+        "4x32": [32, 32, 32, 32],
+    }
+    return mapping[depth]
+
+
+def _log_hidden_activation_heatmap(
+    agent: ArchitectureDebugAgent,
+    trial: optuna.Trial,
+) -> None:
+    observations = np.array(
+        [
+            [-1.0, 1.0, -0.5, 0.5, -0.2, 0.2, 0.0, 0.0],
+            [0.0, 1.2, 0.0, -0.4, 0.0, 0.0, 0.0, 0.0],
+            [0.5, 0.8, 0.2, -0.2, 0.1, -0.1, 1.0, 0.0],
+            [0.0, 0.1, 0.0, -0.1, 0.0, 0.0, 1.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    activations = agent.hidden_activation_snapshot(observations)
+    fig, ax = plt.subplots(figsize=(8, 3))
+    image = ax.imshow(activations, aspect="auto", cmap="viridis")
+    ax.set_xlabel("hidden_unit")
+    ax.set_ylabel("state")
+    ax.set_title(f"Hidden activations trial {trial.number}")
+    fig.colorbar(image, ax=ax)
+    if wandb.run is not None:
+        wandb.log({"architecture/hidden_activation_heatmap": wandb.Image(fig)})
+    plt.close(fig)
