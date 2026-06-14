@@ -92,7 +92,7 @@ class OptimizeConfig:
     direction: str = "maximize"
     study_name: str | None = None
 
-@dataclass
+@dataclass(slots=True)
 class RewardShapingConfig:
     enabled: bool = True
     w_align: float = 0.3
@@ -112,6 +112,7 @@ class ExperimentConfig:
     optimize: OptimizeConfig = field(default_factory=OptimizeConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     agent_config: str | None = None
+    reward_shaping: RewardShapingConfig = field(default_factory=RewardShapingConfig)
 
 
 def load_experiment_config(path: str | Path) -> ExperimentConfig:
