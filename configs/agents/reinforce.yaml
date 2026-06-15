@@ -5,4 +5,11 @@ agent:
     learning_rate: 0.001
     gamma: 0.99
     hidden_dim: 128
+    hidden_layers: [128, 128]
+    activation: relu
+    weight_init: he
+    normalization: null
+    normalization_position: before_activation
+    dropout: 0.0
     batch_episodes: 4
+    gradient_clip_max_norm: null

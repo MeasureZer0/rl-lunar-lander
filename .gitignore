@@ -2,6 +2,23 @@
 __pycache__/
 checkpoints/
 wandb/
+optuna_studies/
+visualisation/
+
+# Python
+.venv/
+venv/
+*.db
+*.pyc
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
 
 # MacOS
 .DS_Store

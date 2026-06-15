@@ -8,6 +8,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 from models.policy_network import PolicyNetwork
+from torch import nn
 from training.buffers import TrajectoryBuffer, Transition
 from training.config import ReinforceAgentConfig
 from utils.checkpointing import load_checkpoint, save_checkpoint
@@ -31,6 +32,12 @@ class ReinforceAgent:
             input_dim=self.observation_dim,
             output_dim=int(self.action_space.n),
             hidden_dim=self.config.hidden_dim,
+            hidden_layers=self.config.hidden_layers,
+            activation=self.config.activation,
+            weight_init=self.config.weight_init,
+            normalization=self.config.normalization,
+            normalization_position=self.config.normalization_position,
+            dropout=self.config.dropout,
         )
         self._optimizer = torch.optim.Adam(
             self._policy.parameters(),
@@ -43,8 +50,12 @@ class ReinforceAgent:
             observation, dtype=torch.float32
         ).unsqueeze(0)
 
+        was_training = self._policy.training
+        self._policy.eval()
         with torch.no_grad():
             logits = self._policy(observation_tensor)
+        if was_training:
+            self._policy.train()
 
         distribution = torch.distributions.Categorical(logits=logits)
 
@@ -90,8 +101,9 @@ class ReinforceAgent:
             [transition.action for transition in transitions], dtype=torch.int64
         )
 
-        returns = self._compute_returns()
-        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+        returns_raw = self._compute_returns()
+        avg_return = float(returns_raw.mean().item())
+        returns = (returns_raw - returns_raw.mean()) / (returns_raw.std() + 1e-8)
         logits = self._policy(observations)
         distribution = torch.distributions.Categorical(logits=logits)
         log_probs = distribution.log_prob(actions)
@@ -99,9 +111,8 @@ class ReinforceAgent:
 
         self._optimizer.zero_grad()
         loss.backward()
+        grad_norm = self._clip_gradients()
         self._optimizer.step()
-
-        avg_return = float(returns.mean().item())
 
         transition_count = len(transitions)
         self._buffer.clear()
@@ -109,10 +120,31 @@ class ReinforceAgent:
             "loss": float(loss.item()),
             "avg_return": avg_return,
             "trajectories_collected": float(transition_count),
+            **({"grad_norm": grad_norm} if grad_norm is not None else {}),
         }
 
     def reset(self) -> None:
         return
+
+    def parameter_count(self) -> int:
+        return sum(parameter.numel() for parameter in self._policy.parameters())
+
+    def hidden_activation_snapshot(self, observations: np.ndarray) -> np.ndarray:
+        obs_tensor = torch.as_tensor(observations, dtype=torch.float32)
+        was_training = self._policy.training
+        self._policy.eval()
+        with torch.no_grad():
+            activations = self._policy.hidden_activations(obs_tensor)
+        if was_training:
+            self._policy.train()
+        return activations.cpu().numpy()
+
+    def _clip_gradients(self) -> float | None:
+        max_norm = self.config.gradient_clip_max_norm
+        if max_norm is None:
+            return None
+        norm = nn.utils.clip_grad_norm_(self._policy.parameters(), max_norm)
+        return float(norm.item())
 
     def save(self, path: str | Path) -> None:
         checkpoint_path = Path(path)
@@ -124,6 +156,14 @@ class ReinforceAgent:
             "seed": self.seed,
             "learning_rate": self.config.learning_rate,
             "gamma": self.config.gamma,
+            "config": {
+                "hidden_layers": self.config.hidden_layers,
+                "activation": self.config.activation,
+                "weight_init": self.config.weight_init,
+                "normalization": self.config.normalization,
+                "normalization_position": self.config.normalization_position,
+                "dropout": self.config.dropout,
+            },
         }
         save_checkpoint(
             state=state,

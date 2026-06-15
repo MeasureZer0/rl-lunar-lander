@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from models.policy_network import PolicyNetwork
+from torch import nn
 from training.buffers import ReplayBuffer, Transition
 from training.config import DQNAgentConfig
 from utils.checkpointing import load_checkpoint, save_checkpoint
@@ -25,6 +27,14 @@ class DQNAgent:
     _policy_net: PolicyNetwork = field(init=False, repr=False)
     _target_net: PolicyNetwork = field(init=False, repr=False)
     _optimizer: torch.optim.Optimizer = field(init=False, repr=False)
+    _scheduler: (
+        torch.optim.lr_scheduler.LRScheduler
+        | torch.optim.lr_scheduler.ReduceLROnPlateau
+        | None
+    ) = field(
+        init=False,
+        repr=False,
+    )
     _epsilon: float = field(init=False, repr=False)
     _steps: int = field(init=False, repr=False)
 
@@ -39,11 +49,23 @@ class DQNAgent:
             input_dim=self.observation_dim,
             output_dim=n_actions,
             hidden_dim=self.config.hidden_dim,
+            hidden_layers=self.config.hidden_layers,
+            activation=self.config.activation,
+            weight_init=self.config.weight_init,
+            normalization=self.config.normalization,
+            normalization_position=self.config.normalization_position,
+            dropout=self.config.dropout,
         )
         self._target_net = PolicyNetwork(
             input_dim=self.observation_dim,
             output_dim=n_actions,
             hidden_dim=self.config.hidden_dim,
+            hidden_layers=self.config.hidden_layers,
+            activation=self.config.activation,
+            weight_init=self.config.weight_init,
+            normalization=self.config.normalization,
+            normalization_position=self.config.normalization_position,
+            dropout=self.config.dropout,
         )
         self._target_net.load_state_dict(self._policy_net.state_dict())
         self._target_net.eval()
@@ -52,14 +74,19 @@ class DQNAgent:
             self._policy_net.parameters(),
             lr=self.config.learning_rate,
         )
+        self._scheduler = self._build_scheduler()
 
     def act(self, observation: np.ndarray, *, explore: bool = True) -> int:
         if explore and self._rng.random() < self._epsilon:
             return int(self._rng.integers(self.action_space.n))
 
-        obs_tensor = torch.tensor(observation, dtype=torch.float32).unsqueeze(0)
+        obs_tensor = torch.as_tensor(observation, dtype=torch.float32).unsqueeze(0)
+        was_training = self._policy_net.training
+        self._policy_net.eval()
         with torch.no_grad():
             q_values = self._policy_net(obs_tensor)
+        if was_training:
+            self._policy_net.train()
         return int(q_values.argmax(dim=1).item())
 
     def observe(self, transition: Transition) -> None:
@@ -74,21 +101,24 @@ class DQNAgent:
 
         self._optimizer.zero_grad()
         loss.backward()
+        grad_norm = self._clip_gradients()
         self._optimizer.step()
+        self._step_scheduler(loss)
 
         self._steps += 1
-        self._epsilon = max(
-            self.config.epsilon_end,
-            self._epsilon * self.config.epsilon_decay,
-        )
+        self._epsilon = self._compute_epsilon()
 
-        if self._steps % self.config.target_update_frequency == 0:
+        if self.config.target_update_type == "soft":
+            self._soft_update_target()
+        elif self._steps % self.config.target_update_frequency == 0:
             self._target_net.load_state_dict(self._policy_net.state_dict())
 
         return {
             "loss": loss.item(),
             "epsilon": self._epsilon,
             "buffer_size": float(len(self._buffer)),
+            "learning_rate": self._optimizer.param_groups[0]["lr"],
+            **({"grad_norm": grad_norm} if grad_norm is not None else {}),
         }
 
     def reset(self) -> None:
@@ -102,15 +132,17 @@ class DQNAgent:
         return [items[i] for i in indices]
 
     def _compute_loss(self, batch: list[Transition]) -> torch.Tensor:
-        obs = torch.tensor(
+        obs = torch.as_tensor(
             np.array([t.observation for t in batch]), dtype=torch.float32
         )
-        actions = torch.tensor([t.action for t in batch], dtype=torch.long).unsqueeze(1)
-        rewards = torch.tensor([t.reward for t in batch], dtype=torch.float32)
-        next_obs = torch.tensor(
+        actions = torch.as_tensor(
+            [t.action for t in batch], dtype=torch.long
+        ).unsqueeze(1)
+        rewards = torch.as_tensor([t.reward for t in batch], dtype=torch.float32)
+        next_obs = torch.as_tensor(
             np.array([t.next_observation for t in batch]), dtype=torch.float32
         )
-        dones = torch.tensor(
+        dones = torch.as_tensor(
             [t.terminated or t.truncated for t in batch], dtype=torch.float32
         )
 
@@ -122,6 +154,89 @@ class DQNAgent:
 
         return F.mse_loss(current_q, target_q)
 
+    def parameter_count(self) -> int:
+        return sum(parameter.numel() for parameter in self._policy_net.parameters())
+
+    def hidden_activation_snapshot(self, observations: np.ndarray) -> np.ndarray:
+        obs_tensor = torch.as_tensor(observations, dtype=torch.float32)
+        was_training = self._policy_net.training
+        self._policy_net.eval()
+        with torch.no_grad():
+            activations = self._policy_net.hidden_activations(obs_tensor)
+        if was_training:
+            self._policy_net.train()
+        return activations.cpu().numpy()
+
+    def _build_scheduler(
+        self,
+    ) -> (
+        torch.optim.lr_scheduler.LRScheduler
+        | torch.optim.lr_scheduler.ReduceLROnPlateau
+        | None
+    ):
+        if self.config.lr_scheduler is None:
+            return None
+        if self.config.lr_scheduler == "step":
+            return torch.optim.lr_scheduler.StepLR(
+                self._optimizer,
+                step_size=self.config.step_lr_step_size,
+                gamma=self.config.step_lr_gamma,
+            )
+        if self.config.lr_scheduler == "plateau":
+            return torch.optim.lr_scheduler.ReduceLROnPlateau(
+                self._optimizer,
+                patience=self.config.reduce_lr_patience,
+            )
+        msg = f"Unsupported LR scheduler '{self.config.lr_scheduler}'."
+        raise ValueError(msg)
+
+    def _step_scheduler(self, loss: torch.Tensor) -> None:
+        if self._scheduler is None:
+            return
+        if isinstance(self._scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            self._scheduler.step(float(loss.item()))
+        else:
+            self._scheduler.step()
+
+    def _clip_gradients(self) -> float | None:
+        max_norm = self.config.gradient_clip_max_norm
+        if max_norm is None:
+            return None
+        norm = nn.utils.clip_grad_norm_(self._policy_net.parameters(), max_norm)
+        return float(norm.item())
+
+    def _compute_epsilon(self) -> float:
+        progress = min(1.0, self._steps / max(1, self.config.epsilon_decay_episodes))
+        if self.config.epsilon_schedule == "linear":
+            value = self.config.epsilon_start + progress * (
+                self.config.epsilon_end - self.config.epsilon_start
+            )
+            return max(self.config.epsilon_end, value)
+        if self.config.epsilon_schedule == "cosine":
+            cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+            return (
+                self.config.epsilon_end
+                + (self.config.epsilon_start - self.config.epsilon_end) * cosine
+            )
+        if self.config.epsilon_schedule == "exponential":
+            return max(
+                self.config.epsilon_end,
+                self._epsilon * self.config.epsilon_decay,
+            )
+        msg = f"Unsupported epsilon schedule '{self.config.epsilon_schedule}'."
+        raise ValueError(msg)
+
+    def _soft_update_target(self) -> None:
+        tau = self.config.tau
+        for target_parameter, policy_parameter in zip(
+            self._target_net.parameters(),
+            self._policy_net.parameters(),
+            strict=True,
+        ):
+            target_parameter.data.copy_(
+                tau * policy_parameter.data + (1.0 - tau) * target_parameter.data
+            )
+
     def save(self, path: str | Path) -> None:
         checkpoint_path = Path(path)
         state = {
@@ -132,6 +247,14 @@ class DQNAgent:
             "seed": self.seed,
             "epsilon": self._epsilon,
             "steps": self._steps,
+            "config": {
+                "hidden_layers": self.config.hidden_layers,
+                "activation": self.config.activation,
+                "weight_init": self.config.weight_init,
+                "normalization": self.config.normalization,
+                "normalization_position": self.config.normalization_position,
+                "dropout": self.config.dropout,
+            },
         }
         save_checkpoint(
             state=state,

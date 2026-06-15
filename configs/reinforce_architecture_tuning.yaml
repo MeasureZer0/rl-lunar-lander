@@ -1,0 +1,39 @@
+env:
+  id: LunarLander-v3
+  render_mode: null
+
+training:
+  episodes: 1000
+  max_steps_per_episode: 1000
+  seed: 123
+  log_every: 10
+  update_every: 1
+
+evaluation:
+  enabled: true
+  episodes: 2
+  frequency: 25
+  render_mode: null
+
+checkpoint:
+  enabled: false
+  directory: checkpoints
+  frequency: 50
+  save_best: true
+
+wandb:
+  enabled: true
+  project: "rl-lunar-lander"
+  name: reinforce-architecture-tuning
+  tags: ["reinforce", "optuna", "architecture"]
+
+optimize:
+  enabled: true
+  mode: architecture
+  n_trials: 30
+  direction: maximize
+  study_name: lunar-lander-reinforce-architecture
+  checkpoint_directory: checkpoints
+  baseline_v3_filename: reinforce_baseline_v3.pt
+
+agent_config: agents/reinforce.yaml
