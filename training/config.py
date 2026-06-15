@@ -117,6 +117,7 @@ class OptimizeConfig:
     checkpoint_directory: str = "checkpoints"
     baseline_v2_filename: str = "baseline_v2.pt"
     baseline_v3_filename: str = "baseline_v3.pt"
+    storage: str | None = None
 
 
 @dataclass(slots=True)

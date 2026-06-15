@@ -101,8 +101,9 @@ class ReinforceAgent:
             [transition.action for transition in transitions], dtype=torch.int64
         )
 
-        returns = self._compute_returns()
-        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+        returns_raw = self._compute_returns()
+        avg_return = float(returns_raw.mean().item())
+        returns = (returns_raw - returns_raw.mean()) / (returns_raw.std() + 1e-8)
         logits = self._policy(observations)
         distribution = torch.distributions.Categorical(logits=logits)
         log_probs = distribution.log_prob(actions)
@@ -112,8 +113,6 @@ class ReinforceAgent:
         loss.backward()
         grad_norm = self._clip_gradients()
         self._optimizer.step()
-
-        avg_return = float(returns.mean().item())
 
         transition_count = len(transitions)
         self._buffer.clear()
