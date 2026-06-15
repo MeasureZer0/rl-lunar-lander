@@ -8,6 +8,9 @@ from typing import Protocol, SupportsInt, cast
 import matplotlib.pyplot as plt
 import numpy as np
 import optuna
+import optuna.importance
+import optuna.visualization
+import plotly.graph_objects
 import wandb
 
 from training.config import ExperimentConfig
@@ -298,9 +301,7 @@ def _apply_best_params(
         )
     if params.get("epsilon_schedule") == "exponential":
         dqn.epsilon_end = 0.01
-        dqn.epsilon_decay = float(
-            cast(float, params.get("epsilon_decay", 0.995))
-        )
+        dqn.epsilon_decay = float(cast(float, params.get("epsilon_decay", 0.995)))
 
 
 def _sample_network_architecture(
@@ -402,4 +403,108 @@ def _log_hidden_activation_heatmap(
     fig.colorbar(image, ax=ax)
     if wandb.run is not None:
         wandb.log({"architecture/hidden_activation_heatmap": wandb.Image(fig)})
+    plt.close(fig)
+
+def log_optuna_summary(
+    study: optuna.Study,
+    *,
+    output_dir: str | Path = "visualisation",
+) -> None:
+    completed = [t for t in study.trials if t.value is not None]
+    if len(completed) < 2:
+        print("optuna_summary: need at least 2 completed trials, skipping.")
+        return
+
+    data_dir = Path(output_dir) / "data"
+    plots_dir = Path(output_dir) / "plots"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    trials_df = study.trials_dataframe()
+    csv_path = data_dir / f"{study.study_name}_trials.csv"
+    trials_df.to_csv(csv_path, index=False)
+    print(f"optuna_summary: wrote {csv_path}")
+
+    importances = _safe_param_importances(study)
+    if importances:
+        _save_importance_bar_chart(importances, study.study_name, plots_dir)
+
+    plot_specs: dict[str, plotly.graph_objects.Figure] = {
+        "optimization_history": optuna.visualization.plot_optimization_history(study),
+        "param_importances": optuna.visualization.plot_param_importances(study),
+        "parallel_coordinate": optuna.visualization.plot_parallel_coordinate(study),
+        "slice": optuna.visualization.plot_slice(study),
+        "edf": optuna.visualization.plot_edf(study),
+    }
+
+    if importances and len(importances) >= 2:
+        top_two = [
+            name
+            for name, _ in sorted(importances.items(), key=lambda kv: kv[1], reverse=True)[:2]
+        ]
+        try:
+            plot_specs[f"contour_{top_two[0]}_vs_{top_two[1]}"] = optuna.visualization.plot_contour(
+                study, params=top_two
+            )
+        except ValueError:
+            pass
+
+    if {"learning_rate", "gamma"}.issubset(_all_param_names(study)):
+        try:
+            plot_specs["contour_learning_rate_vs_gamma"] = optuna.visualization.plot_contour(
+                study, params=["learning_rate", "gamma"]
+            )
+        except ValueError:
+            pass
+
+    for name, figure in plot_specs.items():
+        html_path = plots_dir / f"{study.study_name}_{name}.html"
+        figure.write_html(str(html_path))
+        if wandb.run is not None:
+            try:
+                wandb.log({f"optuna/{name}": wandb.Plotly(figure)})
+            except Exception as exc:  # noqa: BLE001
+                print(f"optuna_summary: could not log {name} to wandb: {exc}")
+
+
+def _all_param_names(study: optuna.Study) -> set[str]:
+    names: set[str] = set()
+    for trial in study.trials:
+        names.update(trial.params.keys())
+    return names
+
+
+def _safe_param_importances(study: optuna.Study) -> dict[str, float]:
+    try:
+        return optuna.importance.get_param_importances(study)
+    except (RuntimeError, ValueError) as exc:
+        print(f"optuna_summary: fANOVA importance failed ({exc}), falling back to MDI.")
+        try:
+            evaluator = optuna.importance.MeanDecreaseImpurityImportanceEvaluator()
+            return optuna.importance.get_param_importances(study, evaluator=evaluator)
+        except Exception as exc2:  # noqa: BLE001
+            print(f"optuna_summary: MDI importance also failed ({exc2}).")
+            return {}
+
+
+def _save_importance_bar_chart(
+    importances: dict[str, float], study_name: str, plots_dir: Path
+) -> None:
+    sorted_items = sorted(importances.items(), key=lambda kv: kv[1], reverse=True)
+    names = [k for k, _ in sorted_items]
+    values = [v for _, v in sorted_items]
+
+    fig, ax = plt.subplots(figsize=(7, max(3, 0.4 * len(names))))
+    ax.barh(names[::-1], values[::-1], color="#2563EB")
+    ax.set_xlabel("importance (fraction of variance explained)")
+    ax.set_title(f"Hyperparameter importance - {study_name}")
+    fig.tight_layout()
+
+    png_path = plots_dir / f"{study_name}_param_importance.png"
+    fig.savefig(png_path, dpi=150, bbox_inches="tight")
+
+    if wandb.run is not None:
+        table = wandb.Table(columns=["parameter", "importance"], data=[list(item) for item in sorted_items])
+        wandb.log({"optuna/param_importance_table": table, "optuna/param_importance": wandb.Image(fig)})
+
     plt.close(fig)
