@@ -33,4 +33,12 @@ optimize:
   direction: "maximize"
   study_name: "lunar-lander-tuning"
 
+reward_shaping:
+  enabled: true
+  w_align: 0.3
+  w_tilt: 0.2
+  w_soft: 0.5
+  w_hover: 0.05
+  w_leg_sym: 0.1
+
 agent_config: agents/random.yaml

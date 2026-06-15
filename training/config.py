@@ -119,6 +119,15 @@ class OptimizeConfig:
     baseline_v3_filename: str = "baseline_v3.pt"
     storage: str | None = None
 
+@dataclass(slots=True)
+class RewardShapingConfig:
+    enabled: bool = True
+    w_align: float = 0.3
+    w_tilt: float = 0.2
+    w_soft: float = 0.5
+    w_hover: float = 0.05
+    w_leg_sym: float = 0.1
+
 
 @dataclass(slots=True)
 class ExperimentConfig:
@@ -130,6 +139,7 @@ class ExperimentConfig:
     optimize: OptimizeConfig = field(default_factory=OptimizeConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     agent_config: str | None = None
+    reward_shaping: RewardShapingConfig = field(default_factory=RewardShapingConfig)
 
 
 def load_experiment_config(path: str | Path) -> ExperimentConfig:

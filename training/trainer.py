@@ -5,6 +5,7 @@ import dataclasses
 import gymnasium as gym
 import wandb
 from agents import AgentProtocol, build_agent
+from rewards.shaping import ShapedLunarLander
 
 from training.checkpoint import CheckpointState, maybe_save_checkpoint
 from training.config import ExperimentConfig
@@ -30,10 +31,17 @@ class Trainer:
                 tags=self.config.wandb.tags,
                 config=dataclasses.asdict(self.config),
             )
-        env = gym.make(
+        base_env = gym.make(
             self.config.env.id,
             render_mode=self.config.env.render_mode,
         )
+        cfg = self.config
+        if cfg.reward_shaping.enabled:
+            weights = {k: getattr(cfg.reward_shaping, k)
+                    for k in ["w_align", "w_tilt", "w_soft", "w_hover", "w_leg_sym"]}
+            env = ShapedLunarLander(base_env, weights=weights)
+        else:
+            env = base_env
 
         try:
             agent = build_agent(
