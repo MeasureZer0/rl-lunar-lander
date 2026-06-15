@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 import optuna
 import wandb
 from training import load_experiment_config
 from training.optuna_search import (
     log_architecture_plots,
+    log_optuna_summary,
     run_trial,
     save_best_checkpoint,
 )
@@ -36,13 +38,24 @@ def main() -> int:
     )
     n_trials = base_config.optimize.n_trials
     direction = base_config.optimize.direction
+    storage = base_config.optimize.storage
+
+    # Create storage directory if needed
+    if storage and storage.startswith("sqlite:///"):
+        db_path = storage.replace("sqlite:///", "")
+        db_dir = Path(db_path).parent
+        db_dir.mkdir(parents=True, exist_ok=True)
 
     study = optuna.create_study(
         study_name=study_name,
         direction=direction,
+        storage=storage,
+        load_if_exists=storage is not None,
     )
 
     print(f"Starting Optimization: {n_trials} trials ({direction})...")
+    if storage is not None:
+        print(f"Study persisted to: {storage}")
 
     try:
         study.optimize(
@@ -75,7 +88,10 @@ def main() -> int:
         )
         if base_config.optimize.mode == "architecture":
             log_architecture_plots(study)
+        log_optuna_summary(study)
         wandb.finish()
+    else:
+        log_optuna_summary(study)
 
     checkpoint_filename = (
         base_config.optimize.baseline_v3_filename
