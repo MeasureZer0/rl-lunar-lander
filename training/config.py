@@ -24,7 +24,14 @@ class ReinforceAgentConfig:
     learning_rate: float = 1e-3
     gamma: float = 0.99
     hidden_dim: int = 128
+    hidden_layers: list[int] = field(default_factory=lambda: [128, 128])
+    activation: str = "relu"
+    weight_init: str = "he"
+    normalization: str | None = None
+    normalization_position: str = "before_activation"
+    dropout: float = 0.0
     batch_episodes: int = 4
+    gradient_clip_max_norm: float | None = None
 
 
 @dataclass(slots=True)
@@ -32,13 +39,28 @@ class DQNAgentConfig:
     learning_rate: float = 1e-3
     gamma: float = 0.99
     hidden_dim: int = 128
+    hidden_layers: list[int] = field(default_factory=lambda: [128, 128])
+    activation: str = "relu"
+    weight_init: str = "he"
+    normalization: str | None = None
+    normalization_position: str = "before_activation"
+    dropout: float = 0.0
     buffer_capacity: int = 50_000
     batch_size: int = 64
     target_update_frequency: int = 100
+    target_update_type: str = "hard"
+    tau: float = 0.005
     epsilon_start: float = 1.0
     epsilon_end: float = 0.05
     epsilon_decay: float = 0.995
+    epsilon_schedule: str = "exponential"
+    epsilon_decay_episodes: int = 300
     min_buffer_size: int = 1_000
+    lr_scheduler: str | None = None
+    step_lr_step_size: int = 100
+    step_lr_gamma: float = 0.9
+    reduce_lr_patience: int = 20
+    gradient_clip_max_norm: float | None = None
 
 
 @dataclass(slots=True)
@@ -91,6 +113,11 @@ class OptimizeConfig:
     n_trials: int = 20
     direction: str = "maximize"
     study_name: str | None = None
+    mode: str = "hyperparameters"
+    checkpoint_directory: str = "checkpoints"
+    baseline_v2_filename: str = "baseline_v2.pt"
+    baseline_v3_filename: str = "baseline_v3.pt"
+    storage: str | None = None
 
 @dataclass(slots=True)
 class RewardShapingConfig:
