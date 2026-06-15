@@ -33,6 +33,7 @@ optimize:
   n_trials: 9
   direction: maximize
   study_name: lunar-lander-reinforce-hyperparameters
+  storage: "sqlite:///optuna_studies/lunar-lander-reinforce-hyperparameters.db"
   checkpoint_directory: checkpoints
   baseline_v2_filename: reinforce_baseline_v2.pt
 

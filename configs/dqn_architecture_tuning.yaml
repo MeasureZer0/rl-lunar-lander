@@ -33,6 +33,7 @@ optimize:
   n_trials: 30
   direction: maximize
   study_name: lunar-lander-dqn-architecture
+  storage: "sqlite:///optuna_studies/lunar-lander-dqn-hyperparameters.db"
   checkpoint_directory: checkpoints
   baseline_v3_filename: baseline_v3.pt
 
