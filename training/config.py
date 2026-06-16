@@ -64,6 +64,25 @@ class DQNAgentConfig:
 
 
 @dataclass(slots=True)
+class PpoAgentConfig:
+    # Shared with REINFORCE
+    learning_rate: float = 3e-4
+    gamma: float = 0.99
+    hidden_dim: int = 128
+    hidden_layers: list[int] = field(default_factory=lambda: [128, 128])
+    activation: str = "relu"
+    weight_init: str = "he"
+    normalization: str | None = None
+    normalization_position: str = "before_activation"
+    dropout: float = 0.0
+    clip_epsilon: float = 0.2
+    entropy_coef: float = 0.01
+    ppo_epochs: int = 4
+    minibatch_size: int = 64
+    gradient_clip_max_norm: float | None = None
+
+
+@dataclass(slots=True)
 class AgentConfig:
     name: str = MISSING
     seed: int | None = None
@@ -118,6 +137,7 @@ class OptimizeConfig:
     baseline_v2_filename: str = "baseline_v2.pt"
     baseline_v3_filename: str = "baseline_v3.pt"
     storage: str | None = None
+
 
 @dataclass(slots=True)
 class RewardShapingConfig:
