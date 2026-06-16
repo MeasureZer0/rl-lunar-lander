@@ -33,6 +33,7 @@ optimize:
   n_trials: 30
   direction: maximize
   study_name: lunar-lander-reinforce-architecture
+  storage: "sqlite:///optuna_studies/lunar-lander-reinforce-architecture.db"
   checkpoint_directory: checkpoints
   baseline_v3_filename: reinforce_baseline_v3.pt
 
