@@ -11,7 +11,7 @@ training:
 
 evaluation:
   enabled: true
-  episodes: 2
+  episodes: 5
   frequency: 25
   render_mode: null
 
