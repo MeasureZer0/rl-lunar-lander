@@ -41,23 +41,11 @@ def run_trial(trial: optuna.Trial, base_config: ExperimentConfig) -> float:
         else:
             _sample_reinforce_hyperparameter_config(trial, config)
     elif config.agent.name == "dqn":
-        config.agent.dqn.learning_rate = trial.suggest_float(
-            "learning_rate", 1e-4, 1e-2, log=True
-        )
-        config.agent.dqn.gamma = trial.suggest_float("gamma", 0.90, 0.999)
-        config.agent.dqn.hidden_dim = trial.suggest_categorical(
-            "hidden_dim", [64, 128, 256]
-        )
-        config.agent.dqn.batch_size = trial.suggest_categorical(
-            "batch_size", [32, 64, 128]
-        )
-        config.agent.dqn.epsilon_decay = trial.suggest_float(
-            "epsilon_decay", 0.990, 0.9999
-        )
-        config.agent.dqn.target_update_frequency = trial.suggest_categorical(
-            "target_update_frequency", [50, 100, 200]
-        )
-    
+        if config.optimize.mode == "architecture":
+            _sample_dqn_architecture_config(trial, config)
+        else:
+            _sample_dqn_hyperparameter_config(trial, config)
+
     if config.reward_shaping.enabled:
         config.reward_shaping.w_align = trial.suggest_float("w_align", 0.0, 1.0)
         config.reward_shaping.w_tilt = trial.suggest_float("w_tilt", 0.0, 0.5)
@@ -94,6 +82,15 @@ def run_trial(trial: optuna.Trial, base_config: ExperimentConfig) -> float:
         and hasattr(agent, "hidden_activation_snapshot")
     ):
         _log_hidden_activation_heatmap(cast(ArchitectureDebugAgent, agent), trial)
+
+    # Log all new visualizations
+    all_rewards = [item.total_reward for item in metrics]
+    _log_reward_distribution(all_rewards, trial)
+    _log_smoothed_learning_curve(all_rewards, trial)
+    _log_architecture_params_text(config, trial)
+
+    if config.agent.name == "dqn" and config.optimize.mode == "hyperparameters":
+        _log_epsilon_decay_params(config, trial)
 
     return avg_reward
 
@@ -148,6 +145,10 @@ def log_architecture_plots(study: optuna.Study) -> None:
     ax.grid(alpha=0.25)
     wandb.log({"architecture/params_vs_avg_reward": wandb.Image(fig)})
     plt.close(fig)
+
+    _log_trial_ranking_table(study)
+
+    _log_reward_vs_trial_number(study)
 
 
 def _sample_reinforce_hyperparameter_config(
@@ -424,6 +425,7 @@ def _log_hidden_activation_heatmap(
         wandb.log({"architecture/hidden_activation_heatmap": wandb.Image(fig)})
     plt.close(fig)
 
+
 def log_optuna_summary(
     study: optuna.Study,
     *,
@@ -459,19 +461,23 @@ def log_optuna_summary(
     if importances and len(importances) >= 2:
         top_two = [
             name
-            for name, _ in sorted(importances.items(), key=lambda kv: kv[1], reverse=True)[:2]
+            for name, _ in sorted(
+                importances.items(), key=lambda kv: kv[1], reverse=True
+            )[:2]
         ]
         try:
-            plot_specs[f"contour_{top_two[0]}_vs_{top_two[1]}"] = optuna.visualization.plot_contour(
-                study, params=top_two
+            plot_specs[f"contour_{top_two[0]}_vs_{top_two[1]}"] = (
+                optuna.visualization.plot_contour(study, params=top_two)
             )
         except ValueError:
             pass
 
     if {"learning_rate", "gamma"}.issubset(_all_param_names(study)):
         try:
-            plot_specs["contour_learning_rate_vs_gamma"] = optuna.visualization.plot_contour(
-                study, params=["learning_rate", "gamma"]
+            plot_specs["contour_learning_rate_vs_gamma"] = (
+                optuna.visualization.plot_contour(
+                    study, params=["learning_rate", "gamma"]
+                )
             )
         except ValueError:
             pass
@@ -523,7 +529,226 @@ def _save_importance_bar_chart(
     fig.savefig(png_path, dpi=150, bbox_inches="tight")
 
     if wandb.run is not None:
-        table = wandb.Table(columns=["parameter", "importance"], data=[list(item) for item in sorted_items])
-        wandb.log({"optuna/param_importance_table": table, "optuna/param_importance": wandb.Image(fig)})
+        table = wandb.Table(
+            columns=["parameter", "importance"],
+            data=[list(item) for item in sorted_items],
+        )
+        wandb.log(
+            {
+                "optuna/param_importance_table": table,
+                "optuna/param_importance": wandb.Image(fig),
+            }
+        )
 
+    plt.close(fig)
+
+
+def _log_reward_distribution(rewards: list[float], trial: optuna.Trial) -> None:
+    """Log reward distribution histogram for last 10 episodes."""
+    if wandb.run is None or len(rewards) < 1:
+        return
+
+    last_10 = rewards[-10:] if len(rewards) >= 10 else rewards
+
+    fig, ax = plt.subplots(figsize=(6, 3))
+    ax.hist(last_10, bins=8, color="#3b82f6", edgecolor="black", alpha=0.7)
+    ax.set_xlabel("reward")
+    ax.set_ylabel("frequency")
+    ax.set_title(f"Reward distribution (last {len(last_10)} episodes)")
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+
+    wandb.log({"trial/reward_distribution": wandb.Image(fig)})
+    plt.close(fig)
+
+
+def _log_smoothed_learning_curve(rewards: list[float], trial: optuna.Trial) -> None:
+    """Log smoothed learning curve with exponential moving average."""
+    if wandb.run is None or len(rewards) < 1:
+        return
+
+    # Compute EMA with alpha=0.1
+    ema_values = []
+    alpha = 0.1
+    ema = rewards[0]
+    ema_values.append(ema)
+
+    for reward in rewards[1:]:
+        ema = alpha * reward + (1 - alpha) * ema
+        ema_values.append(ema)
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    episodes = np.arange(len(rewards))
+    ax.plot(episodes, rewards, alpha=0.3, color="#9ca3af", label="raw")
+    ax.plot(episodes, ema_values, color="#ef4444", linewidth=2, label="EMA (α=0.1)")
+    ax.set_xlabel("episode")
+    ax.set_ylabel("reward")
+    ax.set_title("Learning curve (smoothed)")
+    ax.legend()
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+
+    wandb.log({"trial/learning_curve_smoothed": wandb.Image(fig)})
+    plt.close(fig)
+
+
+def _log_architecture_params_text(
+    config: ExperimentConfig, trial: optuna.Trial
+) -> None:
+    """Log full architecture parameters as text."""
+    if wandb.run is None:
+        return
+
+    agent_cfg = config.agent
+    if agent_cfg.name == "reinforce":
+        cfg = agent_cfg.reinforce
+        params_text = f"""
+REINFORCE Architecture:
+- hidden_layers: {cfg.hidden_layers}
+- activation: {cfg.activation}
+- weight_init: {cfg.weight_init}
+- normalization: {cfg.normalization} ({cfg.normalization_position})
+- dropout: {cfg.dropout}
+- batch_episodes: {cfg.batch_episodes}
+- learning_rate: {cfg.learning_rate}
+- gamma: {cfg.gamma}
+- gradient_clip_max_norm: {cfg.gradient_clip_max_norm}
+"""
+    else:  # DQN
+        cfg = agent_cfg.dqn
+        params_text = f"""
+DQN Architecture & Hyperparameters:
+- hidden_layers: {cfg.hidden_layers}
+- activation: {cfg.activation}
+- weight_init: {cfg.weight_init}
+- normalization: {cfg.normalization} ({cfg.normalization_position})
+- dropout: {cfg.dropout}
+- batch_size: {cfg.batch_size}
+- learning_rate: {cfg.learning_rate}
+- gamma: {cfg.gamma}
+- epsilon_schedule: {cfg.epsilon_schedule}
+- target_update_type: {cfg.target_update_type}
+- lr_scheduler: {cfg.lr_scheduler}
+"""
+
+    wandb.log({"trial/architecture_params": wandb.Html(f"<pre>{params_text}</pre>")})
+
+
+def _log_epsilon_decay_params(config: ExperimentConfig, trial: optuna.Trial) -> None:
+    """Log epsilon decay schedule for DQN."""
+    if wandb.run is None:
+        return
+
+    dqn = config.agent.dqn
+
+    n_episodes = 1000
+    episodes = np.arange(n_episodes)
+    epsilon_vals = []
+
+    for ep in episodes:
+        if dqn.epsilon_schedule == "linear":
+            frac = ep / dqn.epsilon_decay_episodes
+            eps = max(
+                dqn.epsilon_end,
+                dqn.epsilon_start - (dqn.epsilon_start - dqn.epsilon_end) * frac,
+            )
+        elif dqn.epsilon_schedule == "exponential":
+            eps = max(dqn.epsilon_end, dqn.epsilon_start * (dqn.epsilon_decay**ep))
+        else:  # cosine
+            frac = ep / dqn.epsilon_decay_episodes
+            eps = dqn.epsilon_end + 0.5 * (dqn.epsilon_start - dqn.epsilon_end) * (
+                1 + np.cos(np.pi * frac)
+            )
+        epsilon_vals.append(eps)
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(episodes, epsilon_vals, linewidth=2, color="#10b981")
+    ax.set_xlabel("episode")
+    ax.set_ylabel("epsilon")
+    ax.set_title(f"Epsilon decay ({dqn.epsilon_schedule})")
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+
+    wandb.log({"trial/epsilon_decay_schedule": wandb.Image(fig)})
+    plt.close(fig)
+
+
+def _log_trial_ranking_table(study: optuna.Study) -> None:
+    """Log top 10 trials ranking table."""
+    if wandb.run is None:
+        return
+
+    completed_trials = [t for t in study.trials if t.value is not None]
+    if not completed_trials:
+        return
+
+    # Sort by value (reward)
+    sorted_trials = sorted(
+        completed_trials, key=lambda t: cast(float, t.value), reverse=True
+    )[:10]
+
+    rows = []
+    for rank, trial in enumerate(sorted_trials, 1):
+        param_count = trial.user_attrs.get("parameter_count", "N/A")
+        key_params = {
+            k: v
+            for k, v in trial.params.items()
+            if k
+            in {
+                "learning_rate",
+                "gamma",
+                "batch_size",
+                "hidden_dim",
+                "activation",
+                "width",
+                "depth",
+                "batch_episodes",
+            }
+        }
+        param_str = "; ".join(f"{k}={v}" for k, v in key_params.items())
+
+        rows.append([rank, f"{trial.value:.2f}", str(param_count), param_str])
+
+    table = wandb.Table(
+        columns=["rank", "reward", "param_count", "key_params"], data=rows
+    )
+    wandb.log({"optuna/top_10_trials": table})
+
+
+def _log_reward_vs_trial_number(study: optuna.Study) -> None:
+    """Log reward vs trial number to show optimization trend."""
+    if wandb.run is None:
+        return
+
+    trial_nums = []
+    rewards = []
+
+    for trial in study.trials:
+        if trial.value is not None:
+            trial_nums.append(trial.number)
+            rewards.append(trial.value)
+
+    if not trial_nums:
+        return
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.scatter(trial_nums, rewards, alpha=0.5, s=50, color="#6366f1")
+
+    # Add best-so-far line
+    best_so_far = []
+    current_best = float("-inf")
+    for reward in rewards:
+        if reward > current_best:
+            current_best = reward
+        best_so_far.append(current_best)
+    ax.plot(trial_nums, best_so_far, color="#f59e0b", linewidth=2, label="best so far")
+
+    ax.set_xlabel("trial number")
+    ax.set_ylabel("avg_reward")
+    ax.set_title("Optimization progress")
+    ax.legend()
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+
+    wandb.log({"optuna/reward_vs_trial": wandb.Image(fig)})
     plt.close(fig)

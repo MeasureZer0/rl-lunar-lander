@@ -6,12 +6,12 @@ training:
   episodes: 1000
   max_steps_per_episode: 1000
   seed: 123
-  log_every: 1000
+  log_every: 50
   update_every: 1
 
 evaluation:
   enabled: true
-  episodes: 2
+  episodes: 5
   frequency: 5
   render_mode: null
 
