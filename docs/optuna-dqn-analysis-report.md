@@ -40,7 +40,7 @@ The branch `fix/optuna-dqn-repro` addresses the highest-signal issues in that li
 
 ### 1. Optuna optimized the wrong objective
 
-Originally, [`training/optuna_search.py`](/Users/jan/Desktop/Programowanie/pwr/semestr_5/nn-3/training/optuna_search.py:35) scored each trial using the last 10 training episodes rather than evaluation performance.
+Originally, [`training/optuna_search.py`](https://github.com/MeasureZer0/rl-lunar-lander/blob/fix/optuna-dqn-repro/training/optuna_search.py#L35) scored each trial using the last 10 training episodes rather than evaluation performance.
 
 Implications:
 
@@ -51,7 +51,7 @@ Implications:
 
 ### 2. Training and evaluation reward definitions could diverge
 
-Training could wrap the environment with [`ShapedLunarLander`](/Users/jan/Desktop/Programowanie/pwr/semestr_5/nn-3/rewards/shaping.py:58), while evaluation always used a fresh raw Gym environment in [`training/evaluate.py`](/Users/jan/Desktop/Programowanie/pwr/semestr_5/nn-3/training/evaluate.py:22).
+Training could wrap the environment with [`ShapedLunarLander`](https://github.com/MeasureZer0/rl-lunar-lander/blob/fix/optuna-dqn-repro/rewards/shaping.py#L58), while evaluation always used a fresh raw Gym environment in [`training/evaluate.py`](https://github.com/MeasureZer0/rl-lunar-lander/blob/fix/optuna-dqn-repro/training/evaluate.py#L22).
 
 Implications:
 
@@ -60,7 +60,7 @@ Implications:
 
 ### 3. Reward shaping behavior differed across code paths
 
-The config schema default enabled reward shaping, while `optimize.py` used to silently override that behavior unless the CLI flag was passed.
+The config schema default enabled reward shaping, while [`optimize.py`](https://github.com/MeasureZer0/rl-lunar-lander/blob/fix/optuna-dqn-repro/optimize.py) used to silently override that behavior unless the CLI flag was passed.
 
 Implications:
 
