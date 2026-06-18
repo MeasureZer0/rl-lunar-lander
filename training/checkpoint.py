@@ -31,7 +31,7 @@ def maybe_save_checkpoint(
     if checkpoint_config.save_best and _is_best_reward(episode_metrics, state):
         path = checkpoint_dir / "best.pt"
         agent.save(path)
-        state.best_reward = episode_metrics.total_reward
+        state.best_reward = episode_metrics.raw_total_reward
 
 
 def _is_best_reward(
@@ -40,4 +40,4 @@ def _is_best_reward(
 ) -> bool:
     if state.best_reward is None:
         return True
-    return episode_metrics.total_reward > state.best_reward
+    return episode_metrics.raw_total_reward > state.best_reward

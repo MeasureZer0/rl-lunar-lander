@@ -13,6 +13,7 @@ from training.buffers import Transition
 class EpisodeMetrics:
     episode: int
     total_reward: float
+    raw_total_reward: float
     steps: int
     terminated: bool
     truncated: bool
@@ -30,6 +31,7 @@ def collect_episode(
     agent.reset()
 
     total_reward = 0.0
+    raw_total_reward = 0.0
     steps = 0
     terminated = False
     truncated = False
@@ -49,6 +51,7 @@ def collect_episode(
 
         observation = next_observation
         total_reward += float(reward)
+        raw_total_reward += float(_info.get("original_reward", reward))
         steps = step
 
         if terminated or truncated:
@@ -57,6 +60,7 @@ def collect_episode(
     return EpisodeMetrics(
         episode=episode,
         total_reward=total_reward,
+        raw_total_reward=raw_total_reward,
         steps=steps,
         terminated=terminated,
         truncated=truncated,

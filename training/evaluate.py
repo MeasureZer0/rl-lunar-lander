@@ -59,15 +59,19 @@ def log_training_episode(
     update_metrics: dict[str, float],
 ) -> None:
     suffix = _format_metrics(update_metrics)
+    reward_parts = [f"reward={metrics.total_reward:.2f}"]
+    if abs(metrics.raw_total_reward - metrics.total_reward) > 1e-6:
+        reward_parts.append(f"raw_reward={metrics.raw_total_reward:.2f}")
     print(
         "episode="
-        f"{metrics.episode} reward={metrics.total_reward:.2f} "
+        f"{metrics.episode} {' '.join(reward_parts)} "
         f"steps={metrics.steps} terminated={metrics.terminated} "
         f"truncated={metrics.truncated}{suffix}"
     )
     if wandb.run is not None:
         log_data = {
             "train/reward": metrics.total_reward,
+            "train/raw_reward": metrics.raw_total_reward,
             "train/steps": metrics.steps,
             **{f"train/{k}": v for k, v in update_metrics.items()},
         }
@@ -117,6 +121,7 @@ def _run_eval_episode(
     return EpisodeMetrics(
         episode=0,
         total_reward=total_reward,
+        raw_total_reward=total_reward,
         steps=steps,
         terminated=terminated,
         truncated=truncated,
