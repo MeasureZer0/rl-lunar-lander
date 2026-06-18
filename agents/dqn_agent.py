@@ -36,13 +36,19 @@ class DQNAgent:
         repr=False,
     )
     _epsilon: float = field(init=False, repr=False)
-    _steps: int = field(init=False, repr=False)
+    _env_steps: int = field(init=False, repr=False)
+    _optimizer_steps: int = field(init=False, repr=False)
+    _pending_env_steps: int = field(init=False, repr=False)
+    _last_target_sync_env_step: int = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._rng = np.random.default_rng(self.seed)
         self._buffer = ReplayBuffer(capacity=self.config.buffer_capacity)
         self._epsilon = self.config.epsilon_start
-        self._steps = 0
+        self._env_steps = 0
+        self._optimizer_steps = 0
+        self._pending_env_steps = 0
+        self._last_target_sync_env_step = 0
 
         n_actions = int(self.action_space.n)
         self._policy_net = PolicyNetwork(
@@ -91,34 +97,56 @@ class DQNAgent:
 
     def observe(self, transition: Transition) -> None:
         self._buffer.add(transition)
+        self._env_steps += 1
+        self._pending_env_steps += 1
+        self._epsilon = self._compute_epsilon()
 
     def update(self) -> dict[str, float]:
         if len(self._buffer) < self.config.min_buffer_size:
             return {}
 
-        batch = self._sample_batch()
-        loss = self._compute_loss(batch)
+        updates = self._scheduled_updates()
+        if updates == 0:
+            return {
+                "epsilon": self._epsilon,
+                "buffer_size": float(len(self._buffer)),
+                "learning_rate": self._optimizer.param_groups[0]["lr"],
+                "updates": 0.0,
+            }
 
-        self._optimizer.zero_grad()
-        loss.backward()
-        grad_norm = self._clip_gradients()
-        self._optimizer.step()
-        self._step_scheduler(loss)
+        last_loss = 0.0
+        last_grad_norm: float | None = None
+        for _ in range(updates):
+            batch = self._sample_batch()
+            loss = self._compute_loss(batch)
 
-        self._steps += 1
-        self._epsilon = self._compute_epsilon()
+            self._optimizer.zero_grad()
+            loss.backward()
+            last_grad_norm = self._clip_gradients()
+            self._optimizer.step()
+            self._step_scheduler(loss)
 
-        if self.config.target_update_type == "soft":
-            self._soft_update_target()
-        elif self._steps % self.config.target_update_frequency == 0:
+            last_loss = float(loss.item())
+            self._optimizer_steps += 1
+
+            if self.config.target_update_type == "soft":
+                self._soft_update_target()
+
+        if (
+            self.config.target_update_type == "hard"
+            and self._env_steps - self._last_target_sync_env_step
+            >= self.config.target_update_frequency
+        ):
             self._target_net.load_state_dict(self._policy_net.state_dict())
+            self._last_target_sync_env_step = self._env_steps
 
         return {
-            "loss": loss.item(),
-            "epsilon": self._epsilon,
+            "loss": last_loss,
+            "epsilon": float(self._epsilon),
             "buffer_size": float(len(self._buffer)),
             "learning_rate": self._optimizer.param_groups[0]["lr"],
-            **({"grad_norm": grad_norm} if grad_norm is not None else {}),
+            "updates": float(updates),
+            **({"grad_norm": last_grad_norm} if last_grad_norm is not None else {}),
         }
 
     def reset(self) -> None:
@@ -206,7 +234,9 @@ class DQNAgent:
         return float(norm.item())
 
     def _compute_epsilon(self) -> float:
-        progress = min(1.0, self._steps / max(1, self.config.epsilon_decay_episodes))
+        progress = min(
+            1.0, self._env_steps / max(1, self.config.epsilon_decay_episodes)
+        )
         if self.config.epsilon_schedule == "linear":
             value = self.config.epsilon_start + progress * (
                 self.config.epsilon_end - self.config.epsilon_start
@@ -221,10 +251,19 @@ class DQNAgent:
         if self.config.epsilon_schedule == "exponential":
             return max(
                 self.config.epsilon_end,
-                self._epsilon * self.config.epsilon_decay,
+                self.config.epsilon_start
+                * (self.config.epsilon_decay**self._env_steps),
             )
         msg = f"Unsupported epsilon schedule '{self.config.epsilon_schedule}'."
         raise ValueError(msg)
+
+    def _scheduled_updates(self) -> int:
+        frequency = max(1, self.config.train_frequency_steps)
+        updates = self._pending_env_steps // frequency
+        if updates == 0:
+            return 0
+        self._pending_env_steps %= frequency
+        return updates * max(1, self.config.gradient_updates_per_step)
 
     def _soft_update_target(self) -> None:
         tau = self.config.tau
@@ -240,13 +279,15 @@ class DQNAgent:
     def save(self, path: str | Path) -> None:
         checkpoint_path = Path(path)
         state = {
-            "epoch": self._steps,
+            "epoch": self._optimizer_steps,
             "model_state_dict": self._policy_net.state_dict(),
             "optimizer_state_dict": self._optimizer.state_dict(),
             "agent_name": "dqn",
             "seed": self.seed,
             "epsilon": self._epsilon,
-            "steps": self._steps,
+            "steps": self._optimizer_steps,
+            "env_steps": self._env_steps,
+            "optimizer_steps": self._optimizer_steps,
             "config": {
                 "hidden_layers": self.config.hidden_layers,
                 "activation": self.config.activation,
@@ -272,8 +313,15 @@ class DQNAgent:
         self._target_net.load_state_dict(self._policy_net.state_dict())
         if checkpoint and "epsilon" in checkpoint:
             self._epsilon = checkpoint["epsilon"]
-        if checkpoint and "steps" in checkpoint:
-            self._steps = checkpoint["steps"]
+        if checkpoint and "env_steps" in checkpoint:
+            self._env_steps = checkpoint["env_steps"]
+        elif checkpoint and "steps" in checkpoint:
+            self._env_steps = checkpoint["steps"]
+        if checkpoint and "optimizer_steps" in checkpoint:
+            self._optimizer_steps = checkpoint["optimizer_steps"]
+        elif checkpoint and "steps" in checkpoint:
+            self._optimizer_steps = checkpoint["steps"]
+        self._last_target_sync_env_step = self._env_steps
 
     def export_metadata(self, path: str | Path) -> None:
         payload = {
