@@ -5,6 +5,7 @@ from typing import cast
 import gymnasium as gym
 import numpy as np
 from training.config import ExperimentConfig
+from training.seeding import seed_torch
 
 from agents.baseline_agent import RandomAgent
 from agents.dqn_agent import DQNAgent
@@ -36,6 +37,7 @@ def build_agent(
         )
 
     if config.agent.name == "reinforce":
+        seed_torch(config.agent.seed or config.training.seed)
         return ReinforceAgent(
             action_space=discrete_action_space,
             observation_dim=observation_dim,
@@ -44,6 +46,7 @@ def build_agent(
         )
 
     if config.agent.name == "dqn":
+        seed_torch(config.agent.seed or config.training.seed)
         return DQNAgent(
             action_space=discrete_action_space,
             observation_dim=observation_dim,

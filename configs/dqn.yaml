@@ -20,6 +20,9 @@ wandb:
   name: baseline
   tags: ["baseline", "dqn"]
 
+reward_shaping:
+  enabled: false
+
 optimize:
   enabled: true
   n_trials: 50

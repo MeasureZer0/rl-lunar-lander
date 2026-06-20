@@ -15,6 +15,7 @@ from training.evaluate import (
     log_training_episode,
 )
 from training.rollout import EpisodeMetrics, collect_episode
+from training.seeding import seed_everything
 
 
 class Trainer:
@@ -23,6 +24,7 @@ class Trainer:
         self.agent: AgentProtocol | None = None
 
     def run(self) -> list[EpisodeMetrics]:
+        seed_everything(self.config.training.seed)
         if self.config.wandb.enabled:
             wandb.init(
                 project=self.config.wandb.project,

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
+import json
+import shutil
 from pathlib import Path
 from statistics import mean
 from typing import Protocol, SupportsInt, cast
@@ -14,6 +17,7 @@ import plotly.graph_objects
 import wandb
 
 from training.config import ExperimentConfig
+from training.evaluate import evaluate_agent
 from training.trainer import Trainer
 
 
@@ -62,11 +66,24 @@ def run_trial(trial: optuna.Trial, base_config: ExperimentConfig) -> float:
     trainer = Trainer(config)
     metrics = trainer.run()
 
-    if not metrics:
+    if not metrics or trainer.agent is None:
         return float("-inf")
 
+    final_eval = evaluate_agent(
+        agent=trainer.agent,
+        env_config=config.env,
+        training_config=config.training,
+        evaluation_config=config.evaluation,
+        seed_offset=20_000,
+    )
+    avg_reward = final_eval.avg_reward
+    trial.set_user_attr("final_eval_avg_reward", final_eval.avg_reward)
+    trial.set_user_attr("final_eval_avg_steps", final_eval.avg_steps)
+
     rewards = [item.total_reward for item in metrics[-10:]]
-    avg_reward = mean(rewards)
+    raw_rewards = [item.raw_total_reward for item in metrics[-10:]]
+    trial.set_user_attr("train_last10_avg_reward", mean(rewards))
+    trial.set_user_attr("train_last10_avg_raw_reward", mean(raw_rewards))
 
     agent = trainer.agent
     if agent is not None and hasattr(agent, "parameter_count"):
@@ -85,12 +102,25 @@ def run_trial(trial: optuna.Trial, base_config: ExperimentConfig) -> float:
 
     # Log all new visualizations
     all_rewards = [item.total_reward for item in metrics]
+    all_raw_rewards = [item.raw_total_reward for item in metrics]
     _log_reward_distribution(all_rewards, trial)
     _log_smoothed_learning_curve(all_rewards, trial)
     _log_architecture_params_text(config, trial)
+    _save_trial_artifact(trial, config, trainer)
 
     if config.agent.name == "dqn" and config.optimize.mode == "hyperparameters":
         _log_epsilon_decay_params(config, trial)
+
+    if wandb.run is not None:
+        wandb.log(
+            {
+                "optuna/objective_eval_avg_reward": final_eval.avg_reward,
+                "optuna/final_eval_avg_steps": final_eval.avg_steps,
+                "optuna/train_last10_avg_reward": mean(rewards),
+                "optuna/train_last10_avg_raw_reward": mean(raw_rewards),
+                "optuna/train_overall_avg_raw_reward": mean(all_raw_rewards),
+            }
+        )
 
     return avg_reward
 
@@ -101,22 +131,58 @@ def save_best_checkpoint(
     *,
     filename: str,
 ) -> Path:
-    config = copy.deepcopy(base_config)
-    _apply_best_params(config, study.best_params)
-    config.wandb.enabled = False
-    config.checkpoint.enabled = False
-    config.env.render_mode = None
-    config.evaluation.render_mode = None
-
-    trainer = Trainer(config)
-    trainer.run()
-    if trainer.agent is None:
-        msg = "Cannot save checkpoint because training did not create an agent."
+    checkpoint_path = Path(base_config.optimize.checkpoint_directory) / filename
+    trial_checkpoint = study.best_trial.user_attrs.get("checkpoint_path")
+    if not isinstance(trial_checkpoint, str):
+        msg = "Best trial did not record a checkpoint path."
         raise RuntimeError(msg)
 
-    checkpoint_path = Path(config.optimize.checkpoint_directory) / filename
-    trainer.agent.save(checkpoint_path)
+    trial_checkpoint_path = Path(trial_checkpoint)
+    if not trial_checkpoint_path.is_file():
+        msg = f"Best trial checkpoint is missing: {trial_checkpoint_path}"
+        raise RuntimeError(msg)
+
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(trial_checkpoint_path, checkpoint_path)
+
+    trial_metadata = study.best_trial.user_attrs.get("metadata_path")
+    if isinstance(trial_metadata, str):
+        metadata_path = Path(trial_metadata)
+        if metadata_path.is_file():
+            shutil.copy2(
+                metadata_path,
+                checkpoint_path.with_suffix(".json"),
+            )
     return checkpoint_path
+
+
+def _save_trial_artifact(
+    trial: optuna.Trial,
+    config: ExperimentConfig,
+    trainer: Trainer,
+) -> None:
+    if trainer.agent is None:
+        return
+
+    base_dir = (
+        Path(config.optimize.checkpoint_directory)
+        / "optuna_trials"
+        / (config.optimize.study_name or f"optuna-study-{config.agent.name}")
+    )
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    checkpoint_path = base_dir / f"trial_{trial.number:04d}.pt"
+    metadata_path = base_dir / f"trial_{trial.number:04d}.json"
+    trainer.agent.save(checkpoint_path)
+    trial.set_user_attr("checkpoint_path", str(checkpoint_path))
+    trial.set_user_attr("metadata_path", str(metadata_path))
+    metadata = {
+        "trial_number": trial.number,
+        "params": trial.params,
+        "user_attrs": dict(trial.user_attrs),
+        "config": dataclasses.asdict(config),
+    }
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
 
 def log_architecture_plots(study: optuna.Study) -> None:
@@ -237,17 +303,17 @@ def _sample_epsilon_schedule(
     if dqn.epsilon_schedule == "linear":
         dqn.epsilon_decay_episodes = trial.suggest_categorical(
             "epsilon_decay_steps",
-            [100, 300, 500, 1_000],
+            [5_000, 10_000, 20_000, 50_000],
         )
     elif dqn.epsilon_schedule == "exponential":
         dqn.epsilon_decay = trial.suggest_categorical(
             "epsilon_decay",
-            [0.99, 0.995, 0.999],
+            [0.999, 0.9995, 0.9999],
         )
     else:
         dqn.epsilon_decay_episodes = trial.suggest_categorical(
             "epsilon_decay_steps",
-            [100, 300, 500, 1_000],
+            [5_000, 10_000, 20_000, 50_000],
         )
 
 
@@ -263,7 +329,7 @@ def _sample_target_update(
     if dqn.target_update_type == "hard":
         dqn.target_update_frequency = trial.suggest_categorical(
             "target_update_frequency",
-            [50, 100, 200, 500],
+            [500, 1_000, 2_000, 5_000],
         )
     else:
         dqn.tau = trial.suggest_categorical("tau", [0.001, 0.005, 0.01])
@@ -321,7 +387,7 @@ def _apply_best_params(
         )
     if params.get("epsilon_schedule") == "exponential":
         dqn.epsilon_end = 0.01
-        dqn.epsilon_decay = float(cast(float, params.get("epsilon_decay", 0.995)))
+        dqn.epsilon_decay = float(cast(float, params.get("epsilon_decay", 0.9995)))
 
 
 def _sample_network_architecture(

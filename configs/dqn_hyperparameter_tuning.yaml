@@ -27,6 +27,9 @@ wandb:
   name: dqn-hyperparameter-tuning
   tags: ["dqn", "optuna", "hyperparameters"]
 
+reward_shaping:
+  enabled: false
+
 optimize:
   enabled: true
   mode: hyperparameters
