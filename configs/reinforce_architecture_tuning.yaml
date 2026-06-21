@@ -3,7 +3,7 @@ env:
   render_mode: null
 
 training:
-  episodes: 500
+  episodes: 400
   max_steps_per_episode: 1000
   seed: 123
   log_every: 10
@@ -28,7 +28,7 @@ wandb:
   tags: ["reinforce", "optuna", "architecture"]
 
 reward_shaping:
-  enabled: false
+  enabled: true
 
 optimize:
   enabled: true

@@ -2,7 +2,7 @@ env:
   id: LunarLander-v3
 
 training:
-  episodes: 500
+  episodes: 400
   max_steps_per_episode: 1000
   seed: 42
   log_every: 10

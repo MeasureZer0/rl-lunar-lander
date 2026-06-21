@@ -2,7 +2,7 @@ agent:
   name: double_dqn
   seed: 42
   double_dqn:
-    learning_rate: 1e-3
+    learning_rate: 1e-4
     gamma: 0.99
     hidden_dim: 128
     hidden_layers: [128, 128]
