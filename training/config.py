@@ -87,6 +87,8 @@ class DoubleDQNAgentConfig:
     epsilon_schedule: str = "exponential"
     epsilon_decay_episodes: int = 10_000
     min_buffer_size: int = 1_000
+    train_frequency_steps: int = 1
+    gradient_updates_per_step: int = 1
     lr_scheduler: str | None = None
     step_lr_step_size: int = 100
     step_lr_gamma: float = 0.9

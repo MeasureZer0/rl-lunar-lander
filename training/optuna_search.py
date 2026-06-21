@@ -8,6 +8,10 @@ from pathlib import Path
 from statistics import mean
 from typing import Protocol, cast
 
+import matplotlib
+
+matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 import numpy as np
 import optuna
@@ -47,13 +51,6 @@ def run_trial(trial: optuna.Trial, base_config: ExperimentConfig) -> float:
         )
         raise ValueError(msg)
 
-    # reward_shaping mode tunes ONLY the 5 shaping weights and leaves the
-    # agent's hyperparameters/architecture untouched (inherited as-is from
-    # agent_config, normally already the best values found by a prior
-    # hyperparameters/architecture study). This is intentionally NOT an
-    # "else" fallthrough from the hyperparameters branch below: a mode
-    # typo or an unhandled mode must never silently start tuning
-    # hyperparameters instead.
     if mode != "reward_shaping":
         if config.agent.name == "reinforce":
             if mode == "architecture":
@@ -71,13 +68,6 @@ def run_trial(trial: optuna.Trial, base_config: ExperimentConfig) -> float:
             else:
                 _sample_double_dqn_hyperparameter_config(trial, config)
 
-    # The reward-shaping weight search space only applies in
-    # reward_shaping mode now. In hyperparameters/architecture mode,
-    # reward_shaping.enabled (set in the YAML config) controls whether
-    # shaping is active during training/eval at all, but its weights are
-    # no longer sampled there — they come from agent_config / the config
-    # file as fixed values, to keep those studies focused on the
-    # hyperparameters or architecture they're meant to explore.
     if mode == "reward_shaping":
         if not config.reward_shaping.enabled:
             msg = (
@@ -136,7 +126,6 @@ def run_trial(trial: optuna.Trial, base_config: ExperimentConfig) -> float:
     ):
         _log_hidden_activation_heatmap(cast(ArchitectureDebugAgent, agent), trial)
 
-    # Log all new visualizations
     all_rewards = [item.total_reward for item in metrics]
     all_raw_rewards = [item.raw_total_reward for item in metrics]
     _log_reward_distribution(all_rewards, trial)
@@ -266,9 +255,15 @@ def _sample_reinforce_hyperparameter_config(
         [1e-4, 5e-4, 1e-3],
     )
     reinforce.gamma = trial.suggest_categorical("gamma", [0.95, 0.99, 0.999])
+    # Widened from [1, 2, 4, 8]. REINFORCE's gradient variance only shrinks
+    # as 1/sqrt(N) in the number of episodes per batch, so 1->4 episodes
+    # barely halves the noise. The old upper bound of 8 also meant Optuna
+    # could never discover whether an even larger batch helps -- it would
+    # just always pick 8, the ceiling, with no signal about whether 16/32
+    # would be better still.
     reinforce.batch_episodes = trial.suggest_categorical(
         "batch_episodes",
-        [1, 2, 4, 8],
+        [4, 8, 16, 32, 64],
     )
     reinforce.gradient_clip_max_norm = cast(
         float | None,
@@ -295,10 +290,6 @@ def _sample_dqn_hyperparameter_config(
         [5_000, 10_000, 50_000, 100_000],
     )
     dqn.min_buffer_size = min(dqn.min_buffer_size, dqn.buffer_capacity)
-    # Ensure the min_buffer_size/batch_size invariant DQNAgent now validates
-    # in __post_init__ can never be violated by an Optuna-sampled
-    # combination (e.g. buffer_capacity=5_000 with batch_size=256 would
-    # otherwise need min_buffer_size clamped below batch_size).
     dqn.min_buffer_size = max(dqn.min_buffer_size, dqn.batch_size)
     _sample_epsilon_schedule(trial, dqn)
     _sample_target_update(trial, dqn)
@@ -316,10 +307,6 @@ def _sample_double_dqn_hyperparameter_config(
     trial: optuna.Trial,
     config: ExperimentConfig,
 ) -> None:
-    # Mirrors _sample_dqn_hyperparameter_config exactly. DoubleDQNAgentConfig
-    # has the same field set as DQNAgentConfig, so the same search space
-    # applies; the only behavioral difference (double-Q target estimation)
-    # lives in the agent's loss computation, not in its hyperparameters.
     double_dqn = config.agent.double_dqn
     double_dqn.learning_rate = trial.suggest_categorical(
         "learning_rate",
@@ -372,9 +359,12 @@ def _sample_reinforce_architecture_config(
     reinforce = config.agent.reinforce
     _sample_network_architecture(trial, reinforce)
     reinforce.hidden_dim = reinforce.hidden_layers[0]
+    # Widened to match _sample_reinforce_hyperparameter_config (see note
+    # there). Kept identical across both modes so a batch_episodes value
+    # found to work well in one search remains in-range in the other.
     reinforce.batch_episodes = trial.suggest_categorical(
         "batch_episodes",
-        [1, 2, 4, 8],
+        [4, 8, 16, 32, 64],
     )
 
 
@@ -585,7 +575,7 @@ def log_optuna_summary(
         if wandb.run is not None:
             try:
                 wandb.log({f"optuna/{name}": wandb.Plotly(figure)})
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 print(f"optuna_summary: could not log {name} to wandb: {exc}")
 
 
@@ -604,7 +594,7 @@ def _safe_param_importances(study: optuna.Study) -> dict[str, float]:
         try:
             evaluator = optuna.importance.MeanDecreaseImpurityImportanceEvaluator()
             return optuna.importance.get_param_importances(study, evaluator=evaluator)
-        except Exception as exc2:  # noqa: BLE001
+        except Exception as exc2:
             print(f"optuna_summary: MDI importance also failed ({exc2}).")
             return {}
 
@@ -641,7 +631,6 @@ def _save_importance_bar_chart(
 
 
 def _log_reward_distribution(rewards: list[float], trial: optuna.Trial) -> None:
-    """Log reward distribution histogram for last 10 episodes."""
     if wandb.run is None or len(rewards) < 1:
         return
 
@@ -660,11 +649,9 @@ def _log_reward_distribution(rewards: list[float], trial: optuna.Trial) -> None:
 
 
 def _log_smoothed_learning_curve(rewards: list[float], trial: optuna.Trial) -> None:
-    """Log smoothed learning curve with exponential moving average."""
     if wandb.run is None or len(rewards) < 1:
         return
 
-    # Compute EMA with alpha=0.1
     ema_values = []
     alpha = 0.1
     ema = rewards[0]
@@ -677,7 +664,7 @@ def _log_smoothed_learning_curve(rewards: list[float], trial: optuna.Trial) -> N
     fig, ax = plt.subplots(figsize=(7, 4))
     episodes = np.arange(len(rewards))
     ax.plot(episodes, rewards, alpha=0.3, color="#9ca3af", label="raw")
-    ax.plot(episodes, ema_values, color="#ef4444", linewidth=2, label="EMA (α=0.1)")
+    ax.plot(episodes, ema_values, color="#ef4444", linewidth=2, label="EMA (alpha=0.1)")
     ax.set_xlabel("episode")
     ax.set_ylabel("reward")
     ax.set_title("Learning curve (smoothed)")
@@ -692,7 +679,6 @@ def _log_smoothed_learning_curve(rewards: list[float], trial: optuna.Trial) -> N
 def _log_architecture_params_text(
     config: ExperimentConfig, trial: optuna.Trial
 ) -> None:
-    """Log full architecture parameters as text."""
     if wandb.run is None:
         return
 
@@ -712,11 +698,6 @@ REINFORCE Architecture:
 - gradient_clip_max_norm: {cfg.gradient_clip_max_norm}
 """
     else:
-        # DQN and Double DQN share the same config shape; only the label
-        # and the underlying config block differ. Reading agent_cfg.dqn
-        # unconditionally here was a bug: for a double_dqn run it would
-        # log the (untouched, default) DQN config instead of the actual
-        # double_dqn config that was tuned.
         agent_label = "Double DQN" if agent_cfg.name == "double_dqn" else "DQN"
         cfg = agent_cfg.double_dqn if agent_cfg.name == "double_dqn" else agent_cfg.dqn
         params_text = f"""
@@ -738,12 +719,9 @@ REINFORCE Architecture:
 
 
 def _log_epsilon_decay_params(config: ExperimentConfig, trial: optuna.Trial) -> None:
-    """Log epsilon decay schedule for DQN or Double DQN."""
     if wandb.run is None:
         return
 
-    # Bug fix: this always read config.agent.dqn, which silently logged
-    # the wrong (default/untouched) schedule for double_dqn runs.
     dqn = (
         config.agent.double_dqn
         if config.agent.name == "double_dqn"
@@ -763,7 +741,7 @@ def _log_epsilon_decay_params(config: ExperimentConfig, trial: optuna.Trial) -> 
             )
         elif dqn.epsilon_schedule == "exponential":
             eps = max(dqn.epsilon_end, dqn.epsilon_start * (dqn.epsilon_decay**ep))
-        else:  # cosine
+        else:
             frac = ep / dqn.epsilon_decay_episodes
             eps = dqn.epsilon_end + 0.5 * (dqn.epsilon_start - dqn.epsilon_end) * (
                 1 + np.cos(np.pi * frac)
@@ -783,7 +761,6 @@ def _log_epsilon_decay_params(config: ExperimentConfig, trial: optuna.Trial) -> 
 
 
 def _log_trial_ranking_table(study: optuna.Study) -> None:
-    """Log top 10 trials ranking table."""
     if wandb.run is None:
         return
 
@@ -791,7 +768,6 @@ def _log_trial_ranking_table(study: optuna.Study) -> None:
     if not completed_trials:
         return
 
-    # Sort by value (reward)
     sorted_trials = sorted(
         completed_trials, key=lambda t: cast(float, t.value), reverse=True
     )[:10]
@@ -825,7 +801,6 @@ def _log_trial_ranking_table(study: optuna.Study) -> None:
 
 
 def _log_reward_vs_trial_number(study: optuna.Study) -> None:
-    """Log reward vs trial number to show optimization trend."""
     if wandb.run is None:
         return
 
@@ -843,7 +818,6 @@ def _log_reward_vs_trial_number(study: optuna.Study) -> None:
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.scatter(trial_nums, rewards, alpha=0.5, s=50, color="#6366f1")
 
-    # Add best-so-far line
     best_so_far = []
     current_best = float("-inf")
     for reward in rewards:

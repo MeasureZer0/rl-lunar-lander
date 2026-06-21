@@ -2,14 +2,14 @@ agent:
   name: reinforce
   seed: 42
   reinforce:
-    learning_rate: 1e-4
+    learning_rate: 0.001
     gamma: 0.99
-    hidden_dim: 128
-    hidden_layers: [128, 128]
-    activation: relu
-    weight_init: he
-    normalization: null
+    hidden_dim: 256
+    hidden_layers: [256, 256]
+    activation: leaky_relu
+    weight_init: xavier
+    normalization: layer
     normalization_position: before_activation
     dropout: 0.0
     batch_episodes: 4
-    gradient_clip_max_norm: null
+    gradient_clip_max_norm: 1.0

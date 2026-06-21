@@ -29,6 +29,11 @@ wandb:
 
 reward_shaping:
   enabled: true
+  w_align: 0.31824157428105593
+  w_tilt: 0.36041317570103154
+  w_soft: 0.34830828480430553
+  w_hover: 0.08615194107928856
+  w_leg_sym: 0.1498937016402889
 
 optimize:
   enabled: true

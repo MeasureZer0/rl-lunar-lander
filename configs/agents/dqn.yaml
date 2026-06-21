@@ -2,23 +2,23 @@ agent:
   name: dqn
   seed: 42
   dqn:
-    learning_rate: 1e-4
-    gamma: 0.99
-    hidden_dim: 128
-    hidden_layers: [128, 128]
-    activation: relu
-    weight_init: he
+    learning_rate: 0.0001
+    gamma: 0.999
+    hidden_dim: 64
+    hidden_layers: [64, 64, 64]
+    activation: elu
+    weight_init: orthogonal
     normalization: null
     normalization_position: before_activation
     dropout: 0.0
-    buffer_capacity: 50000
-    batch_size: 64
-    target_update_frequency: 1000
+    buffer_capacity: 100000
+    batch_size: 128
+    target_update_frequency: 2000
     target_update_type: hard
     tau: 0.005
     epsilon_start: 1.0
     epsilon_end: 0.01
-    epsilon_decay: 0.9995
+    epsilon_decay: 0.9999
     epsilon_schedule: exponential
     epsilon_decay_episodes: 10000
     min_buffer_size: 1000
@@ -28,4 +28,4 @@ agent:
     step_lr_step_size: 100
     step_lr_gamma: 0.9
     reduce_lr_patience: 20
-    gradient_clip_max_norm: null
+    gradient_clip_max_norm: 1
