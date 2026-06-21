@@ -8,12 +8,6 @@ training:
   log_every: 10
   update_every: 1
 
-evaluation:
-  enabled: true
-  episodes: 5
-  frequency: 25
-  render_mode: null
-
 checkpoint:
   enabled: true
   directory: checkpoints
@@ -24,10 +18,7 @@ wandb:
   enabled: true
   project: "rl-lunar-lander"
   name: baseline
-  tags: ["baseline", "dqn"]
-
-reward_shaping:
-  enabled: true
+  tags: ["baseline", "reinforce"]
 
 optimize:
   enabled: true
@@ -35,4 +26,4 @@ optimize:
   direction: "maximize"
   study_name: "lunar-lander-tuning"
 
-agent_config: agents/dqn.yaml
+agent_config: agents/reinforce.yaml

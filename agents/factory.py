@@ -8,6 +8,7 @@ from training.config import ExperimentConfig
 from training.seeding import seed_torch
 
 from agents.baseline_agent import RandomAgent
+from agents.double_dqn_agent import DoubleDQNAgent
 from agents.dqn_agent import DQNAgent
 from agents.protocol import AgentProtocol
 from agents.reinforce_agent import ReinforceAgent
@@ -52,6 +53,15 @@ def build_agent(
             observation_dim=observation_dim,
             seed=config.agent.seed,
             config=config.agent.dqn,
+        )
+
+    if config.agent.name == "double_dqn":
+        seed_torch(config.agent.seed or config.training.seed)
+        return DoubleDQNAgent(
+            action_space=discrete_action_space,
+            observation_dim=observation_dim,
+            seed=config.agent.seed,
+            config=config.agent.double_dqn,
         )
 
     msg = f"Unsupported agent '{config.agent.name}'."

@@ -39,7 +39,7 @@ class RandomAgent:
         return
 
     def save(self, path: str | Path) -> None:
-        checkpoint_path = Path(path)
+        checkpoint_path = Path(path).with_suffix(".json")
         checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "agent": "random",
@@ -49,7 +49,7 @@ class RandomAgent:
         checkpoint_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def load(self, path: str | Path) -> None:
-        checkpoint_path = Path(path)
+        checkpoint_path = Path(path).with_suffix(".json")
         payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         self.seed = payload.get("seed")
         self._rng = np.random.default_rng(self.seed)

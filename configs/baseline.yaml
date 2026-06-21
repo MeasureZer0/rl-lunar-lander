@@ -3,7 +3,7 @@ env:
   render_mode: null
 
 training:
-  episodes: 1000
+  episodes: 500
   max_steps_per_episode: 1000
   seed: 123
   log_every: 50

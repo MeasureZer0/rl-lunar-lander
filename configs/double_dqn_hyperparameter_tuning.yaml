@@ -24,20 +24,20 @@ checkpoint:
 wandb:
   enabled: true
   project: "rl-lunar-lander"
-  name: reinforce-architecture-tuning
-  tags: ["reinforce", "optuna", "architecture"]
+  name: double-dqn-hyperparameter-tuning
+  tags: ["double_dqn", "optuna", "hyperparameters"]
 
 reward_shaping:
   enabled: false
 
 optimize:
   enabled: true
-  mode: architecture
-  n_trials: 30
+  mode: hyperparameters
+  n_trials: 25
   direction: maximize
-  study_name: lunar-lander-reinforce-architecture
-  storage: "sqlite:///optuna_studies/lunar-lander-reinforce-architecture.db"
+  study_name: lunar-lander-double-dqn-hyperparameters
+  storage: "sqlite:///optuna_studies/lunar-lander-double-dqn-hyperparameters.db"
   checkpoint_directory: checkpoints
-  baseline_v3_filename: reinforce_baseline_v3.pt
+  baseline_v2_filename: double_dqn_baseline_v2.pt
 
-agent_config: agents/reinforce.yaml
+agent_config: agents/double_dqn.yaml

@@ -6,7 +6,7 @@ import json
 import shutil
 from pathlib import Path
 from statistics import mean
-from typing import Protocol, SupportsInt, cast
+from typing import Protocol, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,7 +16,7 @@ import optuna.visualization
 import plotly.graph_objects
 import wandb
 
-from training.config import ExperimentConfig
+from training.config import DoubleDQNAgentConfig, DQNAgentConfig, ExperimentConfig
 from training.evaluate import evaluate_agent
 from training.trainer import Trainer
 
@@ -38,19 +38,55 @@ class NetworkArchitectureConfig(Protocol):
 
 def run_trial(trial: optuna.Trial, base_config: ExperimentConfig) -> float:
     config = copy.deepcopy(base_config)
+    mode = config.optimize.mode
 
-    if config.agent.name == "reinforce":
-        if config.optimize.mode == "architecture":
-            _sample_reinforce_architecture_config(trial, config)
-        else:
-            _sample_reinforce_hyperparameter_config(trial, config)
-    elif config.agent.name == "dqn":
-        if config.optimize.mode == "architecture":
-            _sample_dqn_architecture_config(trial, config)
-        else:
-            _sample_dqn_hyperparameter_config(trial, config)
+    if mode not in {"hyperparameters", "architecture", "reward_shaping"}:
+        msg = (
+            f"Unsupported optimize.mode '{mode}'. Expected one of "
+            "'hyperparameters', 'architecture', 'reward_shaping'."
+        )
+        raise ValueError(msg)
 
-    if config.reward_shaping.enabled:
+    # reward_shaping mode tunes ONLY the 5 shaping weights and leaves the
+    # agent's hyperparameters/architecture untouched (inherited as-is from
+    # agent_config, normally already the best values found by a prior
+    # hyperparameters/architecture study). This is intentionally NOT an
+    # "else" fallthrough from the hyperparameters branch below: a mode
+    # typo or an unhandled mode must never silently start tuning
+    # hyperparameters instead.
+    if mode != "reward_shaping":
+        if config.agent.name == "reinforce":
+            if mode == "architecture":
+                _sample_reinforce_architecture_config(trial, config)
+            else:
+                _sample_reinforce_hyperparameter_config(trial, config)
+        elif config.agent.name == "dqn":
+            if mode == "architecture":
+                _sample_dqn_architecture_config(trial, config)
+            else:
+                _sample_dqn_hyperparameter_config(trial, config)
+        elif config.agent.name == "double_dqn":
+            if mode == "architecture":
+                _sample_double_dqn_architecture_config(trial, config)
+            else:
+                _sample_double_dqn_hyperparameter_config(trial, config)
+
+    # The reward-shaping weight search space only applies in
+    # reward_shaping mode now. In hyperparameters/architecture mode,
+    # reward_shaping.enabled (set in the YAML config) controls whether
+    # shaping is active during training/eval at all, but its weights are
+    # no longer sampled there — they come from agent_config / the config
+    # file as fixed values, to keep those studies focused on the
+    # hyperparameters or architecture they're meant to explore.
+    if mode == "reward_shaping":
+        if not config.reward_shaping.enabled:
+            msg = (
+                "optimize.mode is 'reward_shaping' but reward_shaping.enabled "
+                "is false. Set reward_shaping.enabled: true so the sampled "
+                "weights actually take effect during training and "
+                "evaluation."
+            )
+            raise ValueError(msg)
         config.reward_shaping.w_align = trial.suggest_float("w_align", 0.0, 1.0)
         config.reward_shaping.w_tilt = trial.suggest_float("w_tilt", 0.0, 0.5)
         config.reward_shaping.w_soft = trial.suggest_float("w_soft", 0.0, 1.0)
@@ -59,8 +95,8 @@ def run_trial(trial: optuna.Trial, base_config: ExperimentConfig) -> float:
 
     config.env.render_mode = None
     config.evaluation.render_mode = None
-    config.wandb.name = f"{config.optimize.mode}-trial-{trial.number}"
-    config.wandb.tags = [*config.wandb.tags, "optuna", config.optimize.mode]
+    config.wandb.name = f"{mode}-trial-{trial.number}"
+    config.wandb.tags = [*config.wandb.tags, "optuna", mode]
     config.checkpoint.enabled = False
 
     trainer = Trainer(config)
@@ -108,7 +144,10 @@ def run_trial(trial: optuna.Trial, base_config: ExperimentConfig) -> float:
     _log_architecture_params_text(config, trial)
     _save_trial_artifact(trial, config, trainer)
 
-    if config.agent.name == "dqn" and config.optimize.mode == "hyperparameters":
+    if (
+        config.agent.name in {"dqn", "double_dqn"}
+        and config.optimize.mode == "hyperparameters"
+    ):
         _log_epsilon_decay_params(config, trial)
 
     if wandb.run is not None:
@@ -256,10 +295,50 @@ def _sample_dqn_hyperparameter_config(
         [5_000, 10_000, 50_000, 100_000],
     )
     dqn.min_buffer_size = min(dqn.min_buffer_size, dqn.buffer_capacity)
-    _sample_epsilon_schedule(trial, config)
-    _sample_target_update(trial, config)
-    _sample_lr_scheduler(trial, config)
+    # Ensure the min_buffer_size/batch_size invariant DQNAgent now validates
+    # in __post_init__ can never be violated by an Optuna-sampled
+    # combination (e.g. buffer_capacity=5_000 with batch_size=256 would
+    # otherwise need min_buffer_size clamped below batch_size).
+    dqn.min_buffer_size = max(dqn.min_buffer_size, dqn.batch_size)
+    _sample_epsilon_schedule(trial, dqn)
+    _sample_target_update(trial, dqn)
+    _sample_lr_scheduler(trial, dqn)
     dqn.gradient_clip_max_norm = cast(
+        float | None,
+        trial.suggest_categorical(
+            "gradient_clip_max_norm",
+            [None, 1.0, 5.0, 10.0],
+        ),
+    )
+
+
+def _sample_double_dqn_hyperparameter_config(
+    trial: optuna.Trial,
+    config: ExperimentConfig,
+) -> None:
+    # Mirrors _sample_dqn_hyperparameter_config exactly. DoubleDQNAgentConfig
+    # has the same field set as DQNAgentConfig, so the same search space
+    # applies; the only behavioral difference (double-Q target estimation)
+    # lives in the agent's loss computation, not in its hyperparameters.
+    double_dqn = config.agent.double_dqn
+    double_dqn.learning_rate = trial.suggest_categorical(
+        "learning_rate",
+        [1e-4, 5e-4, 1e-3],
+    )
+    double_dqn.gamma = trial.suggest_categorical("gamma", [0.95, 0.99, 0.999])
+    double_dqn.batch_size = trial.suggest_categorical("batch_size", [32, 64, 128, 256])
+    double_dqn.buffer_capacity = trial.suggest_categorical(
+        "buffer_capacity",
+        [5_000, 10_000, 50_000, 100_000],
+    )
+    double_dqn.min_buffer_size = min(
+        double_dqn.min_buffer_size, double_dqn.buffer_capacity
+    )
+    double_dqn.min_buffer_size = max(double_dqn.min_buffer_size, double_dqn.batch_size)
+    _sample_epsilon_schedule(trial, double_dqn)
+    _sample_target_update(trial, double_dqn)
+    _sample_lr_scheduler(trial, double_dqn)
+    double_dqn.gradient_clip_max_norm = cast(
         float | None,
         trial.suggest_categorical(
             "gradient_clip_max_norm",
@@ -277,6 +356,15 @@ def _sample_dqn_architecture_config(
     dqn.hidden_dim = dqn.hidden_layers[0]
 
 
+def _sample_double_dqn_architecture_config(
+    trial: optuna.Trial,
+    config: ExperimentConfig,
+) -> None:
+    double_dqn = config.agent.double_dqn
+    _sample_network_architecture(trial, double_dqn)
+    double_dqn.hidden_dim = double_dqn.hidden_layers[0]
+
+
 def _sample_reinforce_architecture_config(
     trial: optuna.Trial,
     config: ExperimentConfig,
@@ -292,9 +380,8 @@ def _sample_reinforce_architecture_config(
 
 def _sample_epsilon_schedule(
     trial: optuna.Trial,
-    config: ExperimentConfig,
+    dqn: DQNAgentConfig | DoubleDQNAgentConfig,
 ) -> None:
-    dqn = config.agent.dqn
     dqn.epsilon_schedule = trial.suggest_categorical(
         "epsilon_schedule",
         ["linear", "exponential", "cosine"],
@@ -319,9 +406,8 @@ def _sample_epsilon_schedule(
 
 def _sample_target_update(
     trial: optuna.Trial,
-    config: ExperimentConfig,
+    dqn: DQNAgentConfig | DoubleDQNAgentConfig,
 ) -> None:
-    dqn = config.agent.dqn
     dqn.target_update_type = trial.suggest_categorical(
         "target_update_type",
         ["hard", "soft"],
@@ -337,7 +423,7 @@ def _sample_target_update(
 
 def _sample_lr_scheduler(
     trial: optuna.Trial,
-    config: ExperimentConfig,
+    dqn: DQNAgentConfig | DoubleDQNAgentConfig,
 ) -> None:
     scheduler = cast(
         str | None,
@@ -346,48 +432,12 @@ def _sample_lr_scheduler(
             [None, "step", "plateau"],
         ),
     )
-    config.agent.dqn.lr_scheduler = scheduler
+    dqn.lr_scheduler = scheduler
     if scheduler == "step":
-        config.agent.dqn.step_lr_step_size = 100
-        config.agent.dqn.step_lr_gamma = 0.9
+        dqn.step_lr_step_size = 100
+        dqn.step_lr_gamma = 0.9
     elif scheduler == "plateau":
-        config.agent.dqn.reduce_lr_patience = 20
-
-
-def _apply_best_params(
-    config: ExperimentConfig,
-    params: dict[str, object],
-) -> None:
-    dqn = config.agent.dqn
-    reinforce = config.agent.reinforce
-    for key, value in params.items():
-        if key in {"architecture_family", "epsilon_decay_steps"}:
-            continue
-        if key == "width":
-            width = int(cast(SupportsInt, value))
-            _set_hidden_layers(config, [width, width])
-        elif key == "depth":
-            _set_hidden_layers(config, _depth_layers(str(value)))
-        elif key == "normalization_variant":
-            _apply_normalization_variant(config, str(value))
-        elif config.agent.name == "reinforce" and hasattr(reinforce, key):
-            setattr(reinforce, key, value)
-        elif config.agent.name == "dqn" and hasattr(dqn, key):
-            setattr(dqn, key, value)
-
-    if params.get("epsilon_schedule") == "linear":
-        dqn.epsilon_end = 0.01
-        dqn.epsilon_decay_episodes = int(
-            cast(SupportsInt, params.get("epsilon_decay_steps", 300))
-        )
-    if params.get("epsilon_schedule") == "cosine":
-        dqn.epsilon_end = 0.01
-        dqn.epsilon_decay_episodes = int(
-            cast(SupportsInt, params.get("epsilon_decay_steps", 300))
-        )
-    if params.get("epsilon_schedule") == "exponential":
-        dqn.epsilon_end = 0.01
-        dqn.epsilon_decay = float(cast(float, params.get("epsilon_decay", 0.9995)))
+        dqn.reduce_lr_patience = 20
 
 
 def _sample_network_architecture(
@@ -418,25 +468,6 @@ def _sample_network_architecture(
         ["none", "bn_before", "bn_after", "layer", "dropout"],
     )
     _apply_network_normalization_variant(network_config, str(norm_variant))
-
-
-def _set_hidden_layers(config: ExperimentConfig, hidden_layers: list[int]) -> None:
-    if config.agent.name == "reinforce":
-        config.agent.reinforce.hidden_layers = hidden_layers
-        config.agent.reinforce.hidden_dim = hidden_layers[0]
-    else:
-        config.agent.dqn.hidden_layers = hidden_layers
-        config.agent.dqn.hidden_dim = hidden_layers[0]
-
-
-def _apply_normalization_variant(
-    config: ExperimentConfig,
-    variant: str,
-) -> None:
-    network_config = (
-        config.agent.reinforce if config.agent.name == "reinforce" else config.agent.dqn
-    )
-    _apply_network_normalization_variant(network_config, variant)
 
 
 def _apply_network_normalization_variant(
@@ -680,10 +711,16 @@ REINFORCE Architecture:
 - gamma: {cfg.gamma}
 - gradient_clip_max_norm: {cfg.gradient_clip_max_norm}
 """
-    else:  # DQN
-        cfg = agent_cfg.dqn
+    else:
+        # DQN and Double DQN share the same config shape; only the label
+        # and the underlying config block differ. Reading agent_cfg.dqn
+        # unconditionally here was a bug: for a double_dqn run it would
+        # log the (untouched, default) DQN config instead of the actual
+        # double_dqn config that was tuned.
+        agent_label = "Double DQN" if agent_cfg.name == "double_dqn" else "DQN"
+        cfg = agent_cfg.double_dqn if agent_cfg.name == "double_dqn" else agent_cfg.dqn
         params_text = f"""
-DQN Architecture & Hyperparameters:
+{agent_label} Architecture & Hyperparameters:
 - hidden_layers: {cfg.hidden_layers}
 - activation: {cfg.activation}
 - weight_init: {cfg.weight_init}
@@ -701,11 +738,17 @@ DQN Architecture & Hyperparameters:
 
 
 def _log_epsilon_decay_params(config: ExperimentConfig, trial: optuna.Trial) -> None:
-    """Log epsilon decay schedule for DQN."""
+    """Log epsilon decay schedule for DQN or Double DQN."""
     if wandb.run is None:
         return
 
-    dqn = config.agent.dqn
+    # Bug fix: this always read config.agent.dqn, which silently logged
+    # the wrong (default/untouched) schedule for double_dqn runs.
+    dqn = (
+        config.agent.double_dqn
+        if config.agent.name == "double_dqn"
+        else config.agent.dqn
+    )
 
     n_episodes = 1000
     episodes = np.arange(n_episodes)

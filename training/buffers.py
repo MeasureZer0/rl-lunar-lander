@@ -31,6 +31,24 @@ class ReplayBuffer:
     def __len__(self) -> int:
         return len(self._items)
 
+    def sample(self, rng: np.random.Generator, batch_size: int) -> list[Transition]:
+        """Uniformly sample `batch_size` transitions without replacement.
+
+        This is the public entry point agents should use instead of
+        reaching into `_items` directly (which previously broke
+        encapsulation in DQNAgent/DoubleDQNAgent).
+        """
+        if batch_size > len(self._items):
+            msg = (
+                f"Cannot sample batch_size={batch_size} from a buffer with "
+                f"only {len(self._items)} items. Check that "
+                "min_buffer_size >= batch_size in your agent config."
+            )
+            raise ValueError(msg)
+        indices = rng.choice(len(self._items), size=batch_size, replace=False)
+        items = list(self._items)
+        return [items[i] for i in indices]
+
 
 class TrajectoryBuffer:
     def __init__(self) -> None:

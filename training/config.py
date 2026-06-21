@@ -78,14 +78,14 @@ class DoubleDQNAgentConfig:
     dropout: float = 0.0
     buffer_capacity: int = 50_000
     batch_size: int = 64
-    target_update_frequency: int = 100
+    target_update_frequency: int = 1_000
     target_update_type: str = "hard"
     tau: float = 0.005
     epsilon_start: float = 1.0
     epsilon_end: float = 0.05
-    epsilon_decay: float = 0.995
+    epsilon_decay: float = 0.9995
     epsilon_schedule: str = "exponential"
-    epsilon_decay_episodes: int = 300
+    epsilon_decay_episodes: int = 10_000
     min_buffer_size: int = 1_000
     lr_scheduler: str | None = None
     step_lr_step_size: int = 100
@@ -101,6 +101,7 @@ class AgentConfig:
     random: RandomAgentConfig = field(default_factory=RandomAgentConfig)
     reinforce: ReinforceAgentConfig = field(default_factory=ReinforceAgentConfig)
     dqn: DQNAgentConfig = field(default_factory=DQNAgentConfig)
+    double_dqn: DoubleDQNAgentConfig = field(default_factory=DoubleDQNAgentConfig)
 
 
 @dataclass(slots=True)
@@ -148,6 +149,7 @@ class OptimizeConfig:
     checkpoint_directory: str = "checkpoints"
     baseline_v2_filename: str = "baseline_v2.pt"
     baseline_v3_filename: str = "baseline_v3.pt"
+    baseline_v4_filename: str = "baseline_v4.pt"
     storage: str | None = None
 
 
