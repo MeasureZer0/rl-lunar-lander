@@ -24,10 +24,12 @@ class ReinforceAgent:
     _buffer: TrajectoryBuffer = field(init=False, repr=False)
     _policy: PolicyNetwork = field(init=False, repr=False)
     _optimizer: torch.optim.Optimizer = field(init=False, repr=False)
+    _episodes_since_update: int = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._rng = np.random.default_rng(self.seed)
         self._buffer = TrajectoryBuffer()
+        self._episodes_since_update = 0
         self._policy = PolicyNetwork(
             input_dim=self.observation_dim,
             output_dim=int(self.action_space.n),
@@ -68,6 +70,8 @@ class ReinforceAgent:
 
     def observe(self, transition: Transition) -> None:
         self._buffer.add(transition)
+        if transition.terminated or transition.truncated:
+            self._episodes_since_update += 1
 
     def _compute_returns(self) -> torch.Tensor:
         transitions = self._buffer.get_items()
@@ -87,9 +91,14 @@ class ReinforceAgent:
         return torch.tensor(returns, dtype=torch.float32)
 
     def update(self) -> dict[str, float]:
+        required_episodes = max(1, self.config.batch_episodes)
+        if self._episodes_since_update < required_episodes:
+            return {}
+
         transitions = self._buffer.get_items()
 
         if not transitions:
+            self._episodes_since_update = 0
             return {"loss": 0.0, "avg_return": 0.0, "trajectories_collected": 0.0}
 
         observations = torch.as_tensor(
@@ -116,6 +125,7 @@ class ReinforceAgent:
 
         transition_count = len(transitions)
         self._buffer.clear()
+        self._episodes_since_update = 0
         return {
             "loss": float(loss.item()),
             "avg_return": avg_return,

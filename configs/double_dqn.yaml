@@ -24,15 +24,10 @@ wandb:
   enabled: true
   project: "rl-lunar-lander"
   name: baseline
-  tags: ["baseline", "dqn"]
+  tags: ["baseline", "double_dqn"]
 
 reward_shaping:
   enabled: true
-  w_align: 0.07006485891832512
-  w_tilt: 0.3350465201228257
-  w_soft: 0.022003662857177284
-  w_hover: 0.1327158214289545
-  w_leg_sym: 0.11276458767632049
 
 optimize:
   enabled: true
@@ -40,4 +35,4 @@ optimize:
   direction: "maximize"
   study_name: "lunar-lander-tuning"
 
-agent_config: agents/dqn.yaml
+agent_config: agents/double_dqn.yaml
