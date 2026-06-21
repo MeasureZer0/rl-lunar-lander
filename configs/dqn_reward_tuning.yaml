@@ -24,20 +24,21 @@ checkpoint:
 wandb:
   enabled: true
   project: "rl-lunar-lander"
-  name: dqn-hyperparameter-tuning
-  tags: ["dqn", "optuna", "hyperparameters"]
+  name: dqn-reward-shaping-tuning
+  tags: ["dqn", "optuna", "reward_shaping"]
 
 reward_shaping:
-  enabled: false
+  enabled: true
 
 optimize:
   enabled: true
-  mode: hyperparameters
+  mode: reward_shaping
   n_trials: 25
   direction: maximize
-  study_name: lunar-lander-dqn-hyperparameters
-  storage: "sqlite:///optuna_studies/lunar-lander-dqn-hyperparameters.db"
+  study_name: lunar-lander-dqn-reward-shaping
+  storage: "sqlite:///optuna_studies/lunar-lander-dqn-reward-shaping.db"
   checkpoint_directory: checkpoints
-  baseline_v2_filename: baseline_v2.pt
+  baseline_v4_filename: dqn_baseline_v4.pt
+
 
 agent_config: agents/dqn.yaml

@@ -56,7 +56,6 @@ def main() -> int:
     direction = base_config.optimize.direction
     storage = base_config.optimize.storage
 
-    # Create storage directory if needed
     if storage and storage.startswith("sqlite:///"):
         db_path = storage.replace("sqlite:///", "")
         db_dir = Path(db_path).parent
@@ -81,8 +80,18 @@ def main() -> int:
     except KeyboardInterrupt:
         print("\nOptimization interrupted by user. Returning best results so far.")
 
-    if not study.trials:
-        print("No trials completed.")
+    completed_trials = [
+        trial
+        for trial in study.trials
+        if trial.state == optuna.trial.TrialState.COMPLETE
+    ]
+    if not completed_trials:
+        print(
+            f"No trials completed successfully ({len(study.trials)} attempted, "
+            "0 completed). Check the logs above for the underlying error in "
+            "run_trial.",
+            file=sys.stderr,
+        )
         if base_config.wandb.enabled:
             wandb.finish()
         return 1
@@ -121,7 +130,7 @@ def main() -> int:
     )
 
     print("\noptimization_complete=true")
-    print(f"trials_completed={len(study.trials)}")
+    print(f"trials_completed={len(completed_trials)}")
     print(f"best_value={study.best_value:.2f}")
     print(f"best_checkpoint={checkpoint_path}")
     print("best_params:")

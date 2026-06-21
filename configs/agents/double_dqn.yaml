@@ -1,7 +1,7 @@
 agent:
-  name: dqn
+  name: double_dqn
   seed: 42
-  dqn:
+  double_dqn:
     learning_rate: 1e-4
     gamma: 0.99
     hidden_dim: 128
@@ -22,8 +22,6 @@ agent:
     epsilon_schedule: exponential
     epsilon_decay_episodes: 10000
     min_buffer_size: 1000
-    train_frequency_steps: 1
-    gradient_updates_per_step: 1
     lr_scheduler: null
     step_lr_step_size: 100
     step_lr_gamma: 0.9

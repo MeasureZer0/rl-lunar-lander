@@ -2,11 +2,17 @@ env:
   id: LunarLander-v3
 
 training:
-  episodes: 1000
+  episodes: 400
   max_steps_per_episode: 1000
   seed: 42
   log_every: 10
   update_every: 1
+
+evaluation:
+  enabled: true
+  episodes: 5
+  frequency: 25
+  render_mode: null
 
 checkpoint:
   enabled: true
@@ -21,7 +27,7 @@ wandb:
   tags: ["baseline", "dqn"]
 
 reward_shaping:
-  enabled: false
+  enabled: true
 
 optimize:
   enabled: true

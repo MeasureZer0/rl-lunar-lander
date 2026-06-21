@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,6 +12,7 @@ from models.policy_network import PolicyNetwork
 from torch import nn
 from training.buffers import ReplayBuffer, Transition
 from training.config import DoubleDQNAgentConfig
+from training.schedules import compute_epsilon
 from utils.checkpointing import load_checkpoint, save_checkpoint
 
 
@@ -39,6 +39,15 @@ class DoubleDQNAgent:
     _steps: int = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.config.batch_size > self.config.min_buffer_size:
+            msg = (
+                "DoubleDQNAgentConfig.min_buffer_size "
+                f"({self.config.min_buffer_size}) must be >= batch_size "
+                f"({self.config.batch_size}), otherwise the first update() "
+                "call after crossing min_buffer_size can fail."
+            )
+            raise ValueError(msg)
+
         self._rng = np.random.default_rng(self.seed)
         self._buffer = ReplayBuffer(capacity=self.config.buffer_capacity)
         self._epsilon = self.config.epsilon_start
@@ -96,7 +105,7 @@ class DoubleDQNAgent:
         if len(self._buffer) < self.config.min_buffer_size:
             return {}
 
-        batch = self._sample_batch()
+        batch = self._buffer.sample(self._rng, self.config.batch_size)
         loss = self._compute_loss(batch)
 
         self._optimizer.zero_grad()
@@ -123,13 +132,6 @@ class DoubleDQNAgent:
 
     def reset(self) -> None:
         return
-
-    def _sample_batch(self) -> list[Transition]:
-        indices = self._rng.choice(
-            len(self._buffer), size=self.config.batch_size, replace=False
-        )
-        items = list(self._buffer._items)
-        return [items[i] for i in indices]
 
     def _compute_loss(self, batch: list[Transition]) -> torch.Tensor:
         obs = torch.as_tensor(
@@ -209,25 +211,15 @@ class DoubleDQNAgent:
         return float(norm.item())
 
     def _compute_epsilon(self) -> float:
-        progress = min(1.0, self._steps / max(1, self.config.epsilon_decay_episodes))
-        if self.config.epsilon_schedule == "linear":
-            value = self.config.epsilon_start + progress * (
-                self.config.epsilon_end - self.config.epsilon_start
-            )
-            return max(self.config.epsilon_end, value)
-        if self.config.epsilon_schedule == "cosine":
-            cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
-            return (
-                self.config.epsilon_end
-                + (self.config.epsilon_start - self.config.epsilon_end) * cosine
-            )
-        if self.config.epsilon_schedule == "exponential":
-            return max(
-                self.config.epsilon_end,
-                self._epsilon * self.config.epsilon_decay,
-            )
-        msg = f"Unsupported epsilon schedule '{self.config.epsilon_schedule}'."
-        raise ValueError(msg)
+        return compute_epsilon(
+            schedule=self.config.epsilon_schedule,
+            progress_steps=self._steps,
+            decay_steps=self.config.epsilon_decay_episodes,
+            epsilon_start=self.config.epsilon_start,
+            epsilon_end=self.config.epsilon_end,
+            epsilon_decay=self.config.epsilon_decay,
+            current_epsilon=self._epsilon,
+        )
 
     def _soft_update_target(self) -> None:
         tau = self.config.tau
@@ -241,12 +233,12 @@ class DoubleDQNAgent:
             )
 
     def save(self, path: str | Path) -> None:
-        checkpoint_path = Path(path)
+        checkpoint_path = Path(path).with_suffix(".pt")
         state = {
             "epoch": self._steps,
             "model_state_dict": self._policy_net.state_dict(),
             "optimizer_state_dict": self._optimizer.state_dict(),
-            "agent_name": "dqn",
+            "agent_name": "double_dqn",
             "seed": self.seed,
             "epsilon": self._epsilon,
             "steps": self._steps,
@@ -262,13 +254,14 @@ class DoubleDQNAgent:
         save_checkpoint(
             state=state,
             checkpoint_dir=checkpoint_path.parent,
-            config_name="dqn",
+            config_name="double_dqn",
             filename=checkpoint_path.name,
         )
 
     def load(self, path: str | Path) -> None:
+        checkpoint_path = Path(path).with_suffix(".pt")
         checkpoint = load_checkpoint(
-            checkpoint_path=Path(path),
+            checkpoint_path=checkpoint_path,
             model=self._policy_net,
             optimizer=self._optimizer,
         )
@@ -280,7 +273,7 @@ class DoubleDQNAgent:
 
     def export_metadata(self, path: str | Path) -> None:
         payload = {
-            "agent": "dqn",
+            "agent": "double_dqn",
             "seed": self.seed,
             "learning_rate": self.config.learning_rate,
             "gamma": self.config.gamma,

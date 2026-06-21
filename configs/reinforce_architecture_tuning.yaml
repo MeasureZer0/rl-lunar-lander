@@ -3,7 +3,7 @@ env:
   render_mode: null
 
 training:
-  episodes: 1000
+  episodes: 400
   max_steps_per_episode: 1000
   seed: 123
   log_every: 10
@@ -26,6 +26,9 @@ wandb:
   project: "rl-lunar-lander"
   name: reinforce-architecture-tuning
   tags: ["reinforce", "optuna", "architecture"]
+
+reward_shaping:
+  enabled: true
 
 optimize:
   enabled: true

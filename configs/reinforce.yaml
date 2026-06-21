@@ -1,31 +1,24 @@
 env:
   id: LunarLander-v3
-  render_mode: null
 
 training:
   episodes: 400
   max_steps_per_episode: 1000
-  seed: 123
-  log_every: 50
+  seed: 42
+  log_every: 10
   update_every: 1
-
-evaluation:
-  enabled: true
-  episodes: 5
-  frequency: 5
-  render_mode: null
 
 checkpoint:
   enabled: true
   directory: checkpoints
-  frequency: 5
+  frequency: 50
   save_best: true
 
 wandb:
   enabled: true
   project: "rl-lunar-lander"
   name: baseline
-  tags: ["baseline", "random"]
+  tags: ["baseline", "reinforce"]
 
 optimize:
   enabled: true
@@ -33,12 +26,4 @@ optimize:
   direction: "maximize"
   study_name: "lunar-lander-tuning"
 
-reward_shaping:
-  enabled: true
-  w_align: 0.3
-  w_tilt: 0.2
-  w_soft: 0.5
-  w_hover: 0.05
-  w_leg_sym: 0.1
-
-agent_config: agents/random.yaml
+agent_config: agents/reinforce.yaml

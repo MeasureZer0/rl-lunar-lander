@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,6 +12,7 @@ from models.policy_network import PolicyNetwork
 from torch import nn
 from training.buffers import ReplayBuffer, Transition
 from training.config import DQNAgentConfig
+from training.schedules import compute_epsilon
 from utils.checkpointing import load_checkpoint, save_checkpoint
 
 
@@ -42,6 +42,15 @@ class DQNAgent:
     _last_target_sync_env_step: int = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.config.batch_size > self.config.min_buffer_size:
+            msg = (
+                "DQNAgentConfig.min_buffer_size "
+                f"({self.config.min_buffer_size}) must be >= batch_size "
+                f"({self.config.batch_size}), otherwise the first update() "
+                "call after crossing min_buffer_size can fail."
+            )
+            raise ValueError(msg)
+
         self._rng = np.random.default_rng(self.seed)
         self._buffer = ReplayBuffer(capacity=self.config.buffer_capacity)
         self._epsilon = self.config.epsilon_start
@@ -117,7 +126,7 @@ class DQNAgent:
         last_loss = 0.0
         last_grad_norm: float | None = None
         for _ in range(updates):
-            batch = self._sample_batch()
+            batch = self._buffer.sample(self._rng, self.config.batch_size)
             loss = self._compute_loss(batch)
 
             self._optimizer.zero_grad()
@@ -151,13 +160,6 @@ class DQNAgent:
 
     def reset(self) -> None:
         return
-
-    def _sample_batch(self) -> list[Transition]:
-        indices = self._rng.choice(
-            len(self._buffer), size=self.config.batch_size, replace=False
-        )
-        items = list(self._buffer._items)
-        return [items[i] for i in indices]
 
     def _compute_loss(self, batch: list[Transition]) -> torch.Tensor:
         obs = torch.as_tensor(
@@ -234,28 +236,15 @@ class DQNAgent:
         return float(norm.item())
 
     def _compute_epsilon(self) -> float:
-        progress = min(
-            1.0, self._env_steps / max(1, self.config.epsilon_decay_episodes)
+        return compute_epsilon(
+            schedule=self.config.epsilon_schedule,
+            progress_steps=self._env_steps,
+            decay_steps=self.config.epsilon_decay_episodes,
+            epsilon_start=self.config.epsilon_start,
+            epsilon_end=self.config.epsilon_end,
+            epsilon_decay=self.config.epsilon_decay,
+            current_epsilon=self._epsilon,
         )
-        if self.config.epsilon_schedule == "linear":
-            value = self.config.epsilon_start + progress * (
-                self.config.epsilon_end - self.config.epsilon_start
-            )
-            return max(self.config.epsilon_end, value)
-        if self.config.epsilon_schedule == "cosine":
-            cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
-            return (
-                self.config.epsilon_end
-                + (self.config.epsilon_start - self.config.epsilon_end) * cosine
-            )
-        if self.config.epsilon_schedule == "exponential":
-            return max(
-                self.config.epsilon_end,
-                self.config.epsilon_start
-                * (self.config.epsilon_decay**self._env_steps),
-            )
-        msg = f"Unsupported epsilon schedule '{self.config.epsilon_schedule}'."
-        raise ValueError(msg)
 
     def _scheduled_updates(self) -> int:
         frequency = max(1, self.config.train_frequency_steps)
@@ -277,7 +266,7 @@ class DQNAgent:
             )
 
     def save(self, path: str | Path) -> None:
-        checkpoint_path = Path(path)
+        checkpoint_path = Path(path).with_suffix(".pt")
         state = {
             "epoch": self._optimizer_steps,
             "model_state_dict": self._policy_net.state_dict(),
@@ -305,8 +294,9 @@ class DQNAgent:
         )
 
     def load(self, path: str | Path) -> None:
+        checkpoint_path = Path(path).with_suffix(".pt")
         checkpoint = load_checkpoint(
-            checkpoint_path=Path(path),
+            checkpoint_path=checkpoint_path,
             model=self._policy_net,
             optimizer=self._optimizer,
         )

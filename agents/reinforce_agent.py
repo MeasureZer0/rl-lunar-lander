@@ -147,7 +147,7 @@ class ReinforceAgent:
         return float(norm.item())
 
     def save(self, path: str | Path) -> None:
-        checkpoint_path = Path(path)
+        checkpoint_path = Path(path).with_suffix(".pt")
         state = {
             "epoch": 0,
             "model_state_dict": self._policy.state_dict(),
@@ -173,8 +173,9 @@ class ReinforceAgent:
         )
 
     def load(self, path: str | Path) -> None:
+        checkpoint_path = Path(path).with_suffix(".pt")
         load_checkpoint(
-            checkpoint_path=Path(path),
+            checkpoint_path=checkpoint_path,
             model=self._policy,
             optimizer=self._optimizer,
         )
